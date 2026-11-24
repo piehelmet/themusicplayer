@@ -17,7 +17,8 @@ Package: `com.themusicplayer.app` · minSdk 21 · targetSdk 34
 
 Tagged builds with attached APKs are on the [GitHub Releases page](../../releases):
 
-- **v4.0** (latest) — optional visualizer, Ivory theme, original echo-play icon
+- **v5.0** (latest) — Aurora theme, persistent rotation, reliable active-row highlight
+- **v4.0** — optional visualizer, Ivory theme, original echo-play icon
 - **v3.2** — visualizer bars removed, other motion restored
 - **v3.1** — short-lived fully static now-playing experiment
 - **v3.0** — complete UI redesign
@@ -29,14 +30,15 @@ were rebuilt from their tagged commits and are debug-signed with the same key. T
 
 ## Included in v2
 
-### High-end interface (v4 refresh)
-- Two complete UI moods, switchable from the ⋯ menu: **Obsidian** (midnight glass) and **Ivory** (warm editorial cream, champagne accents, serif display type and a fine gilt rule)
+### High-end interface (v5 refresh)
+- Three complete UI moods, switchable from the ⋯ menu: **Obsidian** (midnight glass), **Ivory** (warm editorial cream, champagne accents, serif display type and a fine gilt rule) and **Aurora** (deep teal night, mint light, wide-spaced sans display)
 - Rebuilt around custom views instead of stock Android buttons: icon-only circular transport controls, navigation chips and a floating glass mini player
 - Immersive artwork backdrop: the current cover is blurred behind the library and the full player (Android 12+)
 - Animated ambient gradient that drifts and recolours from the cover art
 - Bottom-sheet player with rounded top corners, drag handle and slide-up motion
 - Large rounded cover art, accent-tinted sliders and active-row highlighting
 - **Optional spectrum visualizer**: off by default, toggle from the now-playing screen or the ⋯ menu; remembers your choice
+- Active track is clearly tinted in every theme, including Ivory; device tilts no longer reset the open player or playback
 - Staggered list entrance animations, springy chip/button feedback and smooth accent crossfades
 - Original echo-into-play launcher icon (adaptive on Android 8+, hand-drawn vectors/PNG for older devices)
 - Cover art from embedded tags with generated colour-themed placeholders
@@ -91,7 +93,7 @@ src/com/themusicplayer/app/
     Art.java                 embedded cover art, cache, colour extraction, rounded covers
     AmbientBackground.java   animated translucent gradient backdrop
     Glass.java               frosted-glass drawables
-    Theme.java               Obsidian / Ivory palettes and typography
+    Theme.java               Obsidian / Ivory / Aurora palettes and typography
     VisualizerView.java      optional animated spectrum bars
     MusicWidget.java         home-screen widget
     ReplayGain.java          lightweight ReplayGain tag reader

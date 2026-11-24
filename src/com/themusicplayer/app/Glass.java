@@ -22,6 +22,16 @@ public final class Glass {
         return d;
     }
 
+    /** Stronger card for the currently playing row. */
+    public static GradientDrawable activeCard(int accent, float radius) {
+        GradientDrawable d = new GradientDrawable();
+        d.setShape(GradientDrawable.RECTANGLE);
+        d.setCornerRadius(radius);
+        d.setColor(Theme.activeCardFill(accent));
+        d.setStroke(1, Theme.activeCardStroke(accent));
+        return d;
+    }
+
     public static GradientDrawable pill(int accent) {
         GradientDrawable d = new GradientDrawable();
         d.setShape(GradientDrawable.RECTANGLE);

@@ -15,6 +15,7 @@ import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.content.res.Configuration;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -105,6 +106,8 @@ public class MainActivity extends Activity {
     private boolean gridMode = false;
     private boolean userSeeking = false;
     private long lastLrcIndex = -2;
+    private long highlightedId = -2;
+    private int highlightedAccent = 0;
     private boolean animateItems = true;
     private int dragFrom = -1;
     private int dragStartY = 0;
@@ -132,9 +135,12 @@ public class MainActivity extends Activity {
         playlists = new Playlists(this);
         settings = getSharedPreferences("tmp_settings", MODE_PRIVATE);
         Theme.set(settings.getInt("theme", Theme.OBSIDIAN));
+        currentAccent = Theme.baseAccent();
         visualizerOn = settings.getBoolean("visualizer_on", false);
         buildUi();
         requestPermissionsIfNeeded();
+        // Keep playback alive even when this Activity is recreated or unbound.
+        startService(new Intent(this, MusicService.class));
         bindService(new Intent(this, MusicService.class), connection, BIND_AUTO_CREATE);
         handleIntent(getIntent());
     }
@@ -238,8 +244,22 @@ public class MainActivity extends Activity {
     }
 
     private void switchTheme() {
-        settings.edit().putInt("theme", Theme.next()).apply();
-        recreate();
+        boolean playerWasOpen = playerOverlay != null
+                && playerOverlay.getVisibility() == View.VISIBLE;
+        String query = searchBox == null ? "" : searchBox.getText().toString();
+        int next = Theme.next();
+        settings.edit().putInt("theme", next).apply();
+        Theme.set(next);
+        currentAccent = service == null || service.current() == null
+                ? Theme.baseAccent() : Theme.accent(service.accentColor());
+        if (accentAnimator != null) accentAnimator.cancel();
+        if (visualizer != null) visualizer.setPlaying(false);
+        if (playerOverlay != null) playerOverlay.animate().cancel();
+        artPathKey = "";
+        buildUi();
+        searchBox.setText(query);
+        if (playerWasOpen) openPlayer();
+        toast(Theme.name() + " theme");
     }
 
     private void buildUi() {
@@ -271,10 +291,10 @@ public class MainActivity extends Activity {
         titles.addView(section("YOUR LIBRARY"));
         TextView brand = label("The music player", 22, Theme.textPrimary());
         brand.setTypeface(Theme.display());
-        brand.setLetterSpacing(Theme.isLight() ? 0.03f : 0f);
+        brand.setLetterSpacing(Theme.brandSpacing());
         titles.addView(brand);
         header.addView(titles);
-        gridToggle = iconButton("▦", 17, false, v -> {
+        gridToggle = iconButton(gridMode ? "☰" : "▦", 17, false, v -> {
             gridMode = !gridMode;
             gridToggle.setText(gridMode ? "☰" : "▦");
             rebuild();
@@ -320,7 +340,7 @@ public class MainActivity extends Activity {
         // Filter chips
         final String[] sortNames = {"Title", "Artist", "Album", "Duration", "Folder"};
         LinearLayout filterRow = row(LinearLayout.HORIZONTAL);
-        sortButton = chip("Sort: Title", false, v -> {
+        sortButton = chip("Sort: " + sortNames[sortIndex], false, v -> {
             sortIndex = (sortIndex + 1) % sortNames.length;
             sortButton.setText("Sort: " + sortNames[sortIndex]);
             rebuild();
@@ -860,16 +880,19 @@ public class MainActivity extends Activity {
                 texts.addView(sub);
                 v.addView(texts);
                 TextView chevron = label("›", 18, Theme.muted());
+                chevron.setId(5);
                 chevron.setGravity(Gravity.CENTER);
                 v.addView(chevron);
             }
             Song s = getItem(pos);
+            boolean active = service != null && service.current() != null && s != null
+                    && service.current().id == s.id;
+            v.setBackground(active ? Glass.activeCard(currentAccent, 16) : Glass.card(16));
             ((ImageView) v.findViewById(1)).setImageDrawable(drawableFor(s));
             TextView title = (TextView) v.findViewById(3);
             title.setText(s == null ? "" : s.title);
-            boolean active = service != null && service.current() != null && s != null
-                    && service.current().id == s.id;
-            title.setTextColor(active ? currentAccent : Theme.textPrimary());
+            title.setTextColor(active ? Theme.activeText() : Theme.textPrimary());
+            ((TextView) v.findViewById(5)).setTextColor(active ? Theme.activeText() : Theme.muted());
             ((TextView) v.findViewById(4)).setText(s == null ? ""
                     : (s.artist == null || s.artist.trim().isEmpty() ? "<unknown>" : s.artist)
                     + "  ·  " + Library.duration(s.durationMs));
@@ -1289,7 +1312,7 @@ public class MainActivity extends Activity {
     private void about() {
         new AlertDialog.Builder(this).setTitle("The music player")
                 .setMessage("An original, offline music player.\n\n"
-                        + "High-end translucent UI with Obsidian and Ivory themes, "
+                        + "High-end translucent UI with Obsidian, Ivory and Aurora themes, "
                         + "optional spectrum visualizer, animated ambient backgrounds, "
                         + "album art, crossfade, ReplayGain, equalizer, playlists, "
                         + "queue, lyrics, sleep timer, widgets and media controls.\n\n"
@@ -1318,6 +1341,14 @@ public class MainActivity extends Activity {
     @Override protected void onDestroy() {
         try { unbindService(connection); } catch (Exception ignored) {}
         super.onDestroy();
+    }
+
+    // Rotation is handled without recreating the Activity, so the open player,
+    // scroll positions and Service binding all survive a tilt.
+    @Override public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (ambient != null) ambient.invalidate();
+        refresh();
     }
 
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); handleIntent(intent); }
@@ -1415,7 +1446,15 @@ public class MainActivity extends Activity {
         fullTotal.setText(Library.duration(dur));
         miniProgress.setScaleX(dur > 0 ? pos / (float) dur : 0f);
 
-        int desiredAccent = Theme.accent(service.accentColor());
+        int desiredAccent = s == null ? Theme.baseAccent() : Theme.accent(service.accentColor());
+        long activeId = s == null ? -1L : s.id;
+        if (activeId != highlightedId || desiredAccent != highlightedAccent) {
+            highlightedId = activeId;
+            highlightedAccent = desiredAccent;
+            // Visible rows are only rebound on notifyDataSetChanged; otherwise the
+            // active track would not tint until its view was recycled by scrolling.
+            if (listAdapter != null) listAdapter.notifyDataSetChanged();
+        }
         if (desiredAccent != currentAccent) animateAccent(desiredAccent);
         if ("Queue".equals(tab) && service.queue().size() != viewSongs.size()) rebuild();
     }

@@ -43,6 +43,10 @@ public class AmbientBackground extends View {
                     new float[]{hsv[0], Math.min(hsv[1], 0.30f), 0.88f});
             accent2 = Color.HSVToColor(0xFF,
                     new float[]{(hsv[0] + 28) % 360, 0.20f, 0.82f});
+        } else if (Theme.mode() == Theme.AURORA) {
+            // Aurora keeps its own northern-light signature instead of inheriting cover hue.
+            accent = Color.HSVToColor(0xFF, new float[]{168f, 0.72f, 0.38f});
+            accent2 = Color.HSVToColor(0xFF, new float[]{196f, 0.62f, 0.32f});
         } else {
             accent = Color.HSVToColor(0xFF,
                     new float[]{(hsv[0] + 355) % 360, 0.55f, 0.34f});
