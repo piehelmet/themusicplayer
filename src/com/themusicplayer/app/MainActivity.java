@@ -14,11 +14,13 @@ import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.RenderEffect;
 import android.graphics.Shader;
+import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
@@ -79,20 +81,22 @@ public class MainActivity extends Activity {
 
     private AmbientBackground ambient;
     private VisualizerView visualizer;
-    private LinearLayout content, miniPlayer, controls;
+    private LinearLayout content, miniPlayer;
     private FrameLayout browseArea, playerOverlay;
     private ListView list;
     private GridView grid;
     private TextView lyricsPane, miniTitle, miniSub;
     private ScrollView lyricsScroll;
     private EditText searchBox;
-    private Button playlistPicker, genrePicker, gridToggle, playButton, miniPlay;
-    private Spinner sortSpinner;
-    private TextView elapsed, total, fullTitle, fullArtist, fullElapsed, fullTotal, fullLyrics;
-    private SeekBar seekBar, fullSeek;
-    private Button shuffleButton, repeatButton, crossfadeButton;
-    private ImageView miniArt, fullArt, blurredArt;
+    private TextView playlistPicker, genrePicker, gridToggle, playButton, miniPlay;
+    private TextView sortButton, shuffleButton, repeatButton, crossfadeButton;
+    private TextView fullTitle, fullArtist, fullElapsed, fullTotal, fullLyrics;
+    private SeekBar fullSeek;
+    private ImageView miniArt, fullArt, blurredArt, backdropArt;
     private View miniProgress;
+    private final List<TextView> tabChips = new ArrayList<>();
+    private String artPathKey = "";
+    private int sortIndex = 0;
     private int currentAccent = 0xFF5B8CFF;
 
     private Playlists playlists;
@@ -144,24 +148,6 @@ public class MainActivity extends Activity {
         return r;
     }
 
-    private Button glassButton(String text, View.OnClickListener click) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setTextColor(Color.WHITE);
-        b.setAllCaps(false);
-        b.setTextSize(12);
-        b.setBackground(Glass.pill(currentAccent));
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        p.setMargins(4, 2, 4, 2);
-        b.setLayoutParams(p);
-        b.setPadding(dp(12), dp(6), dp(12), dp(6));
-        b.setMinWidth(0);
-        b.setMinimumWidth(0);
-        b.setOnClickListener(click);
-        return b;
-    }
-
     private TextView label(String text, float size, int color) {
         TextView tv = new TextView(this);
         tv.setText(text);
@@ -170,60 +156,116 @@ public class MainActivity extends Activity {
         return tv;
     }
 
+    private TextView section(String text) {
+        TextView tv = label(text, 10, 0x99C6D2FF);
+        tv.setLetterSpacing(0.2f);
+        return tv;
+    }
+
+    /** Modern rounded chip; no default Android button chrome. */
+    private TextView chip(String text, boolean selected, View.OnClickListener click) {
+        TextView tv = label(text, 12, selected ? 0xFF0B0D16 : 0xFFE4EAFF);
+        tv.setBackground(Glass.chip(selected, currentAccent));
+        tv.setGravity(Gravity.CENTER);
+        tv.setPadding(dp(16), dp(9), dp(16), dp(9));
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        p.setMargins(dp(3), dp(3), dp(3), dp(3));
+        tv.setLayoutParams(p);
+        tv.setOnClickListener(v -> { animatePop(v); click.onClick(v); });
+        return tv;
+    }
+
+    private void setChipSelected(TextView chip, boolean selected) {
+        chip.setBackground(Glass.chip(selected, currentAccent));
+        chip.setTextColor(selected ? 0xFF0B0D16 : 0xFFE4EAFF);
+    }
+
+    /** Circular icon button built from a TextView, so it never looks like a stock Button. */
+    private TextView iconButton(String glyph, float size, boolean filled, View.OnClickListener click) {
+        TextView tv = label(glyph, size, filled ? 0xFF0B0D16 : 0xFFFFFFFF);
+        tv.setGravity(Gravity.CENTER);
+        tv.setBackground(Glass.circle(filled, currentAccent));
+        int d = dp(Math.round(size * 2.5f));
+        tv.setMinimumWidth(d);
+        tv.setMinimumHeight(d);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(d, d);
+        p.setMargins(dp(5), dp(4), dp(5), dp(4));
+        tv.setLayoutParams(p);
+        tv.setOnClickListener(v -> { animatePop(v); click.onClick(v); });
+        return tv;
+    }
+
+    private SeekBar styledSeek() {
+        SeekBar bar = new SeekBar(this);
+        bar.setProgressTintList(ColorStateList.valueOf(currentAccent));
+        bar.setThumbTintList(ColorStateList.valueOf(currentAccent));
+        return bar;
+    }
+
+    private void styleSeek(SeekBar bar) {
+        bar.setProgressTintList(ColorStateList.valueOf(currentAccent));
+        bar.setThumbTintList(ColorStateList.valueOf(currentAccent));
+    }
+
+    private void updateTabs() {
+        for (TextView chip : tabChips)
+            setChipSelected(chip, chip.getText().toString().equals(tab));
+    }
+
     private void buildUi() {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(0xFF08090E);
+
+        // Immersive, blurred artwork behind the whole library.
+        backdropArt = new ImageView(this);
+        backdropArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        if (Build.VERSION.SDK_INT >= 31)
+            backdropArt.setRenderEffect(RenderEffect.createBlurEffect(64f, 64f, Shader.TileMode.CLAMP));
+        backdropArt.setAlpha(0.20f);
+        root.addView(backdropArt, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
         ambient = new AmbientBackground(this);
         root.addView(ambient, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         content = row(LinearLayout.VERTICAL);
-        content.setPadding(dp(12), dp(10), dp(12), dp(8));
+        content.setPadding(dp(18), dp(18), dp(18), dp(14));
 
         // Header
         LinearLayout header = row(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView brand = label("THE MUSIC PLAYER", 13, 0xFFEEF2FF);
-        brand.setLetterSpacing(0.14f);
-        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        brand.setLayoutParams(bp);
-        header.addView(brand);
-        gridToggle = glassButton("▦ Grid", v -> {
+        LinearLayout titles = row(LinearLayout.VERTICAL);
+        titles.setLayoutParams(new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        titles.addView(section("YOUR LIBRARY"));
+        TextView brand = label("The music player", 22, 0xFFFFFFFF);
+        brand.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        titles.addView(brand);
+        header.addView(titles);
+        gridToggle = iconButton("▦", 17, false, v -> {
             gridMode = !gridMode;
-            gridToggle.setText(gridMode ? "☷ List" : "▦ Grid");
-            animatePop(gridToggle);
+            gridToggle.setText(gridMode ? "☰" : "▦");
             rebuild();
         });
         header.addView(gridToggle);
-        header.addView(glassButton("⋯", v -> showMainMenu(v)));
+        header.addView(iconButton("⋯", 19, false, v -> showMainMenu(v)));
         content.addView(header);
 
-        // Tabs
-        String[] tabs = {"Songs", "Albums", "Artists", "Genres", "Folders", "Playlists", "Queue", "Lyrics"};
-        LinearLayout tabRow = row(LinearLayout.HORIZONTAL);
-        for (final String t : tabs) {
-            Button b = glassButton(t, v -> {
-                tab = t;
-                if (searchBox != null) searchBox.setText("");
-                animatePop(v);
-                rebuild();
-            });
-            tabRow.addView(b);
-        }
-        HorizontalScrollView tabScroll = new HorizontalScrollView(this);
-        tabScroll.setHorizontalScrollBarEnabled(false);
-        tabScroll.addView(tabRow);
-        content.addView(tabScroll);
-
-        // Filter row
-        LinearLayout filterRow = row(LinearLayout.HORIZONTAL);
+        // Search field
+        LinearLayout searchBar = row(LinearLayout.HORIZONTAL);
+        searchBar.setBackground(Glass.card(20));
+        searchBar.setPadding(dp(14), dp(2), dp(14), dp(2));
+        searchBar.setGravity(Gravity.CENTER_VERTICAL);
+        searchBar.addView(label("⌕", 18, 0x9FB4FF));
         searchBox = new EditText(this);
-        searchBox.setHint("Search library");
-        searchBox.setTextColor(Color.WHITE);
-        searchBox.setHintTextColor(0x99FFFFFF);
-        searchBox.setBackground(Glass.card(14));
-        searchBox.setPadding(dp(12), dp(8), dp(12), dp(8));
+        searchBox.setHint("Search songs, artists, albums");
+        searchBox.setTextColor(0xFFFFFFFF);
+        searchBox.setHintTextColor(0x8C9BBF);
+        searchBox.setBackground(null);
+        searchBox.setSingleLine(true);
+        searchBox.setPadding(dp(10), dp(10), dp(4), dp(10));
         searchBox.setLayoutParams(new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         searchBox.addTextChangedListener(new TextWatcher() {
@@ -231,27 +273,43 @@ public class MainActivity extends Activity {
             public void onTextChanged(CharSequence s, int a, int b, int c) { rebuild(); }
             public void afterTextChanged(Editable s) {}
         });
-        filterRow.addView(searchBox);
+        searchBar.addView(searchBox);
+        content.addView(searchBar);
 
-        playlistPicker = glassButton("Playlist: —", v -> cycleName(playlists.names(), true));
+        // Filter chips
+        final String[] sortNames = {"Title", "Artist", "Album", "Duration", "Folder"};
+        LinearLayout filterRow = row(LinearLayout.HORIZONTAL);
+        sortButton = chip("Sort: Title", false, v -> {
+            sortIndex = (sortIndex + 1) % sortNames.length;
+            sortButton.setText("Sort: " + sortNames[sortIndex]);
+            rebuild();
+        });
+        filterRow.addView(sortButton);
+        playlistPicker = chip("Playlist: —", false, v -> cycleName(playlists.names(), true));
         playlistPicker.setVisibility(View.GONE);
         filterRow.addView(playlistPicker);
-        genrePicker = glassButton("Genre: —", v -> cycleName(Library.genres(this), false));
+        genrePicker = chip("Genre: —", false, v -> cycleName(Library.genres(this), false));
         genrePicker.setVisibility(View.GONE);
         filterRow.addView(genrePicker);
-
-        sortSpinner = new Spinner(this);
-        String[] sorts = {"Title", "Artist", "Album", "Duration", "Folder"};
-        ArrayAdapter<String> sa = new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_item, sorts);
-        sa.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        sortSpinner.setAdapter(sa);
-        sortSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            public void onItemSelected(AdapterView<?> p, View v, int pos, long id) { rebuild(); }
-            public void onNothingSelected(AdapterView<?> p) {}
-        });
-        filterRow.addView(sortSpinner);
         content.addView(filterRow);
+
+        // Navigation chips
+        String[] tabs = {"Songs", "Albums", "Artists", "Genres", "Folders", "Playlists", "Queue", "Lyrics"};
+        LinearLayout tabRow = row(LinearLayout.HORIZONTAL);
+        for (final String t : tabs) {
+            TextView c = chip(t, t.equals(tab), v -> {
+                tab = t;
+                searchBox.setText("");
+                updateTabs();
+                rebuild();
+            });
+            tabChips.add(c);
+            tabRow.addView(c);
+        }
+        HorizontalScrollView tabScroll = new HorizontalScrollView(this);
+        tabScroll.setHorizontalScrollBarEnabled(false);
+        tabScroll.addView(tabRow);
+        content.addView(tabScroll);
 
         // Browse area
         browseArea = new FrameLayout(this);
@@ -261,6 +319,8 @@ public class MainActivity extends Activity {
         list = new ListView(this);
         list.setDivider(null);
         list.setBackgroundColor(Color.TRANSPARENT);
+        list.setClipToPadding(false);
+        list.setPadding(0, dp(6), 0, dp(6));
         listAdapter = new SongListAdapter();
         list.setAdapter(listAdapter);
         list.setOnItemClickListener((p, v, pos, id) -> onItemClick(pos));
@@ -271,8 +331,8 @@ public class MainActivity extends Activity {
 
         grid = new GridView(this);
         grid.setNumColumns(2);
-        grid.setHorizontalSpacing(dp(8));
-        grid.setVerticalSpacing(dp(8));
+        grid.setHorizontalSpacing(dp(10));
+        grid.setVerticalSpacing(dp(10));
         grid.setBackgroundColor(Color.TRANSPARENT);
         gridAdapter = new AlbumGridAdapter();
         grid.setAdapter(gridAdapter);
@@ -283,135 +343,137 @@ public class MainActivity extends Activity {
         lyricsScroll = new ScrollView(this);
         lyricsScroll.setVisibility(View.GONE);
         lyricsPane = label("", 14, 0xFFE8ECFF);
+        lyricsPane.setLineSpacing(dp(6), 1f);
         lyricsPane.setPadding(dp(8), dp(8), dp(8), dp(8));
         lyricsScroll.addView(lyricsPane);
         browseArea.addView(lyricsScroll, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         content.addView(browseArea);
 
-        // Mini player
+        // Floating mini player
         miniPlayer = row(LinearLayout.HORIZONTAL);
-        miniPlayer.setBackground(Glass.card(18));
-        miniPlayer.setPadding(dp(10), dp(8), dp(10), dp(8));
+        miniPlayer.setBackground(Glass.card(22));
+        miniPlayer.setElevation(dp(10));
+        miniPlayer.setPadding(dp(8), dp(8), dp(8), dp(8));
         miniPlayer.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams miniParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        miniParams.setMargins(0, dp(8), 0, 0);
+        miniPlayer.setLayoutParams(miniParams);
         miniArt = new ImageView(this);
-        miniArt.setLayoutParams(new LinearLayout.LayoutParams(dp(46), dp(46)));
+        miniArt.setLayoutParams(new LinearLayout.LayoutParams(dp(52), dp(52)));
         miniArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
         miniPlayer.addView(miniArt);
         LinearLayout meta = row(LinearLayout.VERTICAL);
         meta.setLayoutParams(new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        miniTitle = label("Nothing selected", 14, 0xFFFFFFFF);
+        meta.setPadding(dp(12), 0, dp(6), 0);
+        miniTitle = label("Nothing selected", 15, 0xFFFFFFFF);
         miniTitle.setMaxLines(1);
-        miniSub = label("Tap to open player", 11, 0xBBFFFFFF);
+        miniTitle.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        miniSub = label("Tap to open player", 12, 0xA9B6D6);
         miniSub.setMaxLines(1);
         meta.addView(miniTitle);
         meta.addView(miniSub);
         miniProgress = new View(this);
-        miniProgress.setBackgroundColor(0xFF7AA2FF);
+        miniProgress.setBackgroundColor(currentAccent);
         miniProgress.setPivotX(0f);
-        miniProgress.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(2)));
+        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(2));
+        progressParams.setMargins(0, dp(6), 0, 0);
+        miniProgress.setLayoutParams(progressParams);
         meta.addView(miniProgress);
         miniPlayer.addView(meta);
-        miniPlay = glassButton("▶", v -> {
+        miniPlay = iconButton("▶", 15, true, v -> {
             if (service != null) service.toggle();
-            animatePop(v);
         });
         miniPlayer.addView(miniPlay);
         miniPlayer.setOnClickListener(v -> openPlayer());
         content.addView(miniPlayer);
 
-        // Slim progress row
-        LinearLayout progressRow = row(LinearLayout.HORIZONTAL);
-        progressRow.setGravity(Gravity.CENTER_VERTICAL);
-        elapsed = label("0:00", 10, 0xAAFFFFFF);
-        total = label("0:00", 10, 0xAAFFFFFF);
-        seekBar = new SeekBar(this);
-        seekBar.setLayoutParams(new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
-                if (fromUser) elapsed.setText(Library.duration(p));
-            }
-            public void onStartTrackingTouch(SeekBar s) { userSeeking = true; }
-            public void onStopTrackingTouch(SeekBar s) {
-                userSeeking = false;
-                if (service != null) service.seek(s.getProgress());
-            }
-        });
-        progressRow.addView(elapsed);
-        progressRow.addView(seekBar);
-        progressRow.addView(total);
-        content.addView(progressRow);
-
-        // Main controls
-        controls = row(LinearLayout.HORIZONTAL);
-        controls.setGravity(Gravity.CENTER);
-        controls.addView(glassButton("|<<", v -> { if (service != null) service.prev(); }));
-        playButton = glassButton("Play", v -> { if (service != null) service.toggle(); });
-        controls.addView(playButton);
-        controls.addView(glassButton(">>|", v -> { if (service != null) service.next(true); }));
-        shuffleButton = glassButton("Shuffle", v -> {
-            if (service != null) { service.setShuffle(!service.shuffle()); refresh(); }
-        });
-        controls.addView(shuffleButton);
-        repeatButton = glassButton("Repeat", v -> {
-            if (service != null) { service.cycleRepeat(); refresh(); }
-        });
-        controls.addView(repeatButton);
-        content.addView(controls);
-
         root.addView(content, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         buildPlayerOverlay(root);
         setContentView(root);
+        updateTabs();
         rebuild();
     }
 
     private void buildPlayerOverlay(FrameLayout root) {
         playerOverlay = new FrameLayout(this);
-        playerOverlay.setBackgroundColor(0xE9080910);
+        playerOverlay.setBackgroundColor(0xC6080A12);
         playerOverlay.setVisibility(View.GONE);
         playerOverlay.setAlpha(0f);
 
         blurredArt = new ImageView(this);
         blurredArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
         if (Build.VERSION.SDK_INT >= 31)
-            blurredArt.setRenderEffect(RenderEffect.createBlurEffect(48f, 48f, Shader.TileMode.CLAMP));
-        blurredArt.setAlpha(0.32f);
+            blurredArt.setRenderEffect(RenderEffect.createBlurEffect(60f, 60f, Shader.TileMode.CLAMP));
+        blurredArt.setAlpha(0.26f);
         playerOverlay.addView(blurredArt, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        LinearLayout panel = row(LinearLayout.VERTICAL);
-        panel.setPadding(dp(20), dp(24), dp(20), dp(20));
-        panel.addView(glassButton("✕ Close", v -> closePlayer()));
+        // Bottom sheet with rounded top, handle and scrollable content.
+        LinearLayout sheet = row(LinearLayout.VERTICAL);
+        sheet.setBackground(Glass.sheet(dp(28)));
+        sheet.setElevation(dp(24));
+        FrameLayout.LayoutParams sheetParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        sheetParams.topMargin = dp(44);
+        sheet.setLayoutParams(sheetParams);
 
+        LinearLayout handleRow = row(LinearLayout.HORIZONTAL);
+        handleRow.setGravity(Gravity.CENTER_HORIZONTAL);
+        handleRow.setPadding(0, dp(10), 0, dp(6));
+        View handle = new View(this);
+        handle.setBackground(Glass.handle());
+        handle.setLayoutParams(new LinearLayout.LayoutParams(dp(42), dp(4)));
+        handleRow.addView(handle);
+        sheet.addView(handleRow);
+
+        LinearLayout head = row(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setPadding(dp(22), dp(2), dp(16), dp(6));
+        head.addView(section("NOW PLAYING"));
+        View spacer = new View(this);
+        spacer.setLayoutParams(new LinearLayout.LayoutParams(0, 1, 1f));
+        head.addView(spacer);
+        head.addView(iconButton("✕", 15, false, v -> closePlayer()));
+        sheet.addView(head);
+
+        LinearLayout artWrap = row(LinearLayout.HORIZONTAL);
+        artWrap.setGravity(Gravity.CENTER_HORIZONTAL);
+        artWrap.setPadding(dp(24), dp(4), dp(24), dp(4));
         fullArt = new ImageView(this);
         fullArt.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(260)));
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(244)));
         fullArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        fullArt.setBackground(Glass.card(24));
-        LinearLayout artWrap = row(LinearLayout.HORIZONTAL);
-        artWrap.setGravity(Gravity.CENTER);
+        fullArt.setBackground(Glass.card(dp(24)));
         artWrap.addView(fullArt);
-        panel.addView(artWrap);
+        sheet.addView(artWrap);
 
         visualizer = new VisualizerView(this);
-        visualizer.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(46)));
-        panel.addView(visualizer);
+        LinearLayout.LayoutParams vizParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(36));
+        vizParams.setMargins(0, dp(2), 0, dp(2));
+        visualizer.setLayoutParams(vizParams);
+        sheet.addView(visualizer);
 
-        fullTitle = label("Nothing selected", 23, 0xFFFFFFFF);
+        fullTitle = label("Nothing selected", 22, 0xFFFFFFFF);
         fullTitle.setGravity(Gravity.CENTER);
-        panel.addView(fullTitle);
-        fullArtist = label("", 15, 0xC0FFFFFF);
+        fullTitle.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        fullTitle.setPadding(dp(24), dp(4), dp(24), 0);
+        sheet.addView(fullTitle);
+        fullArtist = label("", 14, 0xB7C3E4);
         fullArtist.setGravity(Gravity.CENTER);
-        panel.addView(fullArtist);
+        fullArtist.setPadding(dp(24), dp(2), dp(24), dp(8));
+        sheet.addView(fullArtist);
 
-        fullSeek = new SeekBar(this);
-        fullSeek.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        fullSeek = styledSeek();
+        LinearLayout.LayoutParams seekParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        seekParams.setMargins(dp(22), dp(4), dp(22), 0);
+        fullSeek.setLayoutParams(seekParams);
         fullSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
                 if (fromUser) fullElapsed.setText(Library.duration(p));
@@ -422,10 +484,11 @@ public class MainActivity extends Activity {
                 if (service != null) service.seek(s.getProgress());
             }
         });
-        panel.addView(fullSeek);
+        sheet.addView(fullSeek);
         LinearLayout times = row(LinearLayout.HORIZONTAL);
-        fullElapsed = label("0:00", 11, 0xAAFFFFFF);
-        fullTotal = label("0:00", 11, 0xAAFFFFFF);
+        times.setPadding(dp(22), 0, dp(22), 0);
+        fullElapsed = label("0:00", 11, 0x9FAED2);
+        fullTotal = label("0:00", 11, 0x9FAED2);
         fullElapsed.setLayoutParams(new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         fullTotal.setLayoutParams(new LinearLayout.LayoutParams(0,
@@ -433,33 +496,51 @@ public class MainActivity extends Activity {
         fullTotal.setGravity(Gravity.RIGHT);
         times.addView(fullElapsed);
         times.addView(fullTotal);
-        panel.addView(times);
+        sheet.addView(times);
 
-        LinearLayout bigControls = row(LinearLayout.HORIZONTAL);
-        bigControls.setGravity(Gravity.CENTER);
-        bigControls.addView(glassButton("|<<", v -> { if (service != null) service.prev(); }));
-        bigControls.addView(glassButton("▶/❚❚", v -> { if (service != null) service.toggle(); }));
-        bigControls.addView(glassButton(">>|", v -> { if (service != null) service.next(true); }));
-        panel.addView(bigControls);
+        LinearLayout transport = row(LinearLayout.HORIZONTAL);
+        transport.setGravity(Gravity.CENTER);
+        transport.setPadding(0, dp(10), 0, dp(2));
+        shuffleButton = iconButton("⤨", 15, false, v -> {
+            if (service != null) { service.setShuffle(!service.shuffle()); refresh(); }
+        });
+        transport.addView(shuffleButton);
+        transport.addView(iconButton("❮❮", 19, false, v -> {
+            if (service != null) service.prev();
+        }));
+        playButton = iconButton("▶", 26, true, v -> {
+            if (service != null) service.toggle();
+        });
+        transport.addView(playButton);
+        transport.addView(iconButton("❯❯", 19, false, v -> {
+            if (service != null) service.next(true);
+        }));
+        repeatButton = iconButton("↻", 15, false, v -> {
+            if (service != null) { service.cycleRepeat(); refresh(); }
+        });
+        transport.addView(repeatButton);
+        sheet.addView(transport);
 
-        crossfadeButton = glassButton("Crossfade", v -> {
+        LinearLayout extras = row(LinearLayout.HORIZONTAL);
+        extras.setGravity(Gravity.CENTER_HORIZONTAL);
+        extras.setPadding(dp(14), dp(8), dp(14), dp(4));
+        crossfadeButton = chip("Crossfade", false, v -> {
             if (service != null) { service.setCrossfade(!service.crossfade()); refresh(); }
         });
-        LinearLayout extras = row(LinearLayout.HORIZONTAL);
-        extras.setGravity(Gravity.CENTER);
         extras.addView(crossfadeButton);
-        extras.addView(glassButton("EQ", v -> showEqualizer()));
-        extras.addView(glassButton("Speed", v -> askSpeed()));
-        extras.addView(glassButton("Sleep", v -> askSleepTimer()));
-        panel.addView(extras);
+        extras.addView(chip("EQ", false, v -> showEqualizer()));
+        extras.addView(chip("Speed", false, v -> askSpeed()));
+        extras.addView(chip("Sleep", false, v -> askSleepTimer()));
+        sheet.addView(extras);
 
-        fullLyrics = label("Lyrics appear here when a matching .lrc file is found.", 13, 0xD0FFFFFF);
+        fullLyrics = label("Lyrics appear here when a matching .lrc file is found.", 12, 0xAEBBDD);
         fullLyrics.setMaxLines(3);
-        panel.addView(fullLyrics);
+        fullLyrics.setPadding(dp(22), dp(8), dp(22), dp(22));
+        sheet.addView(fullLyrics);
 
         ScrollView scroller = new ScrollView(this);
         scroller.setBackgroundColor(Color.TRANSPARENT);
-        scroller.addView(panel);
+        scroller.addView(sheet);
         playerOverlay.addView(scroller, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         root.addView(playerOverlay, new FrameLayout.LayoutParams(
@@ -495,10 +576,19 @@ public class MainActivity extends Activity {
         anim.addUpdateListener(a -> {
             int c = (int) a.getAnimatedValue();
             ambient.setAccent(c);
-            gridToggle.setBackground(Glass.pill(c));
-            playButton.setBackground(Glass.pill(c));
-            miniPlay.setBackground(Glass.pill(c));
-            crossfadeButton.setBackground(Glass.pill(c));
+            miniProgress.setBackgroundColor(c);
+            gridToggle.setBackground(Glass.circle(false, c));
+            miniPlay.setBackground(Glass.circle(true, c));
+            playButton.setBackground(Glass.circle(true, c));
+            shuffleButton.setBackground(Glass.circle(false, c));
+            repeatButton.setBackground(Glass.circle(false, c));
+            crossfadeButton.setBackground(Glass.chip(
+                    service != null && service.crossfade(), c));
+            sortButton.setBackground(Glass.chip(false, c));
+            playlistPicker.setBackground(Glass.chip(false, c));
+            genrePicker.setBackground(Glass.chip(false, c));
+            styleSeek(fullSeek);
+            updateTabs();
         });
         anim.start();
     }
@@ -548,7 +638,7 @@ public class MainActivity extends Activity {
     private String currentPlaylist() { return pickedName(playlists.names(), playlistPicker, "Playlist: "); }
     private String currentGenre() { return pickedName(Library.genres(this), genrePicker, "Genre: "); }
 
-    private String pickedName(List<String> names, Button picker, String prefix) {
+    private String pickedName(List<String> names, TextView picker, String prefix) {
         if (names.isEmpty()) return null;
         String label = picker == null ? "" : picker.getText().toString();
         String selected = label.startsWith(prefix) ? label.substring(prefix.length()) : names.get(0);
@@ -557,7 +647,7 @@ public class MainActivity extends Activity {
 
     private void cycleName(List<String> names, boolean playlist) {
         if (names.isEmpty()) { toast(playlist ? "No playlists yet" : "No genres found"); return; }
-        Button picker = playlist ? playlistPicker : genrePicker;
+        TextView picker = playlist ? playlistPicker : genrePicker;
         String prefix = playlist ? "Playlist: " : "Genre: ";
         String current = pickedName(names, picker, prefix);
         String next = names.get((names.indexOf(current) + 1) % names.size());
@@ -602,10 +692,10 @@ public class MainActivity extends Activity {
             viewSongs.addAll(base);
         }
 
-        if (sortSpinner != null && !"Queue".equals(tab) && !"Lyrics".equals(tab)) {
+        if (!"Queue".equals(tab) && !"Lyrics".equals(tab)) {
             Library.Sort[] modes = {Library.Sort.TITLE, Library.Sort.ARTIST, Library.Sort.ALBUM,
                     Library.Sort.DURATION, Library.Sort.FOLDER};
-            Library.sort(viewSongs, modes[sortMode()], true);
+            Library.sort(viewSongs, modes[sortIndex % modes.length], true);
         }
 
         boolean gridOn = gridMode && ("Albums".equals(tab) || "Artists".equals(tab));
@@ -621,7 +711,7 @@ public class MainActivity extends Activity {
     }
 
     private int sortMode() {
-        return sortSpinner == null ? 0 : sortSpinner.getSelectedItemPosition();
+        return sortIndex;
     }
 
     private void onItemClick(int pos) {
@@ -682,36 +772,45 @@ public class MainActivity extends Activity {
             LinearLayout v = convertView == null ? row(LinearLayout.HORIZONTAL)
                     : (LinearLayout) convertView;
             if (convertView == null) {
-                v.setBackground(Glass.card(14));
-                v.setPadding(dp(8), dp(6), dp(8), dp(6));
+                v.setBackground(Glass.card(16));
+                v.setPadding(dp(8), dp(7), dp(10), dp(7));
                 ImageView art = new ImageView(MainActivity.this);
                 art.setId(1);
-                art.setLayoutParams(new LinearLayout.LayoutParams(dp(48), dp(48)));
+                art.setLayoutParams(new LinearLayout.LayoutParams(dp(54), dp(54)));
                 art.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 v.addView(art);
                 LinearLayout texts = row(LinearLayout.VERTICAL);
                 texts.setId(2);
                 texts.setLayoutParams(new LinearLayout.LayoutParams(0,
                         ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                TextView title = label("", 14, 0xFFFFFFFF);
+                texts.setPadding(dp(12), dp(2), dp(4), dp(2));
+                TextView title = label("", 15, 0xFFFFFFFF);
                 title.setId(3);
                 title.setMaxLines(1);
-                TextView sub = label("", 11, 0xAFFFFFFF);
+                title.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+                TextView sub = label("", 12, 0x9EACCD);
                 sub.setId(4);
                 sub.setMaxLines(1);
                 texts.addView(title);
                 texts.addView(sub);
                 v.addView(texts);
+                TextView chevron = label("›", 18, 0x7182A8);
+                chevron.setGravity(Gravity.CENTER);
+                v.addView(chevron);
             }
             Song s = getItem(pos);
-            ImageView art = (ImageView) v.findViewById(1);
-            art.setImageDrawable(drawableFor(s));
-            ((TextView) v.findViewById(3)).setText(s == null ? "" : s.title);
+            ((ImageView) v.findViewById(1)).setImageDrawable(drawableFor(s));
+            TextView title = (TextView) v.findViewById(3);
+            title.setText(s == null ? "" : s.title);
+            boolean active = service != null && service.current() != null && s != null
+                    && service.current().id == s.id;
+            title.setTextColor(active ? currentAccent : 0xFFFFFFFF);
             ((TextView) v.findViewById(4)).setText(s == null ? ""
-                    : (s.artist == null ? "<unknown>" : s.artist) + "   •   " + Library.duration(s.durationMs));
+                    : (s.artist == null || s.artist.trim().isEmpty() ? "<unknown>" : s.artist)
+                    + "  ·  " + Library.duration(s.durationMs));
             if (animateItems && pos < 12) {
                 v.setAlpha(0f);
-                v.setTranslationX(dp(28));
+                v.setTranslationX(dp(24));
                 v.animate().alpha(1f).translationX(0f)
                         .setDuration(320).setStartDelay(pos * 26L)
                         .setInterpolator(new DecelerateInterpolator()).start();
@@ -729,18 +828,20 @@ public class MainActivity extends Activity {
             LinearLayout v = convertView == null ? row(LinearLayout.VERTICAL)
                     : (LinearLayout) convertView;
             if (convertView == null) {
-                v.setBackground(Glass.card(18));
-                v.setPadding(dp(6), dp(6), dp(6), dp(8));
+                v.setBackground(Glass.card(20));
+                v.setPadding(dp(7), dp(7), dp(7), dp(10));
                 ImageView art = new ImageView(MainActivity.this);
                 art.setId(1);
                 art.setLayoutParams(new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, dp(130)));
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(150)));
                 art.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 v.addView(art);
-                TextView title = label("", 12, 0xFFFFFFFF);
+                TextView title = label("", 13, 0xFFFFFFFF);
                 title.setId(2);
                 title.setGravity(Gravity.CENTER);
                 title.setMaxLines(1);
+                title.setPadding(dp(4), dp(8), dp(4), 0);
+                title.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
                 v.addView(title);
             }
             Song s = getItem(pos);
@@ -1200,31 +1301,43 @@ public class MainActivity extends Activity {
         miniSub.setText(artist);
         fullTitle.setText(title);
         fullArtist.setText(artist);
-        playButton.setText(playing ? "Pause" : "Play");
+        playButton.setText(playing ? "❚❚" : "▶");
         miniPlay.setText(playing ? "❚❚" : "▶");
-        shuffleButton.setText(service.shuffle() ? "Shuffle ●" : "Shuffle");
-        String[] repeatText = {"Repeat", "Repeat all", "Repeat one"};
-        repeatButton.setText(repeatText[service.repeat()]);
-        crossfadeButton.setText(service.crossfade() ? "Crossfade ●" : "Crossfade");
+
+        boolean shuffleOn = service.shuffle();
+        shuffleButton.setBackground(Glass.circle(shuffleOn, currentAccent));
+        shuffleButton.setTextColor(shuffleOn ? 0xFF0B0D16 : 0xFFFFFFFF);
+        boolean repeatOn = service.repeat() != 0;
+        repeatButton.setBackground(Glass.circle(repeatOn, currentAccent));
+        repeatButton.setTextColor(repeatOn ? 0xFF0B0D16 : 0xFFFFFFFF);
+        boolean crossOn = service.crossfade();
+        crossfadeButton.setText(crossOn ? "Crossfade ●" : "Crossfade");
+        crossfadeButton.setBackground(Glass.chip(crossOn, currentAccent));
+        crossfadeButton.setTextColor(crossOn ? 0xFF0B0D16 : 0xFFE4EAFF);
+
         visualizer.setPlaying(playing);
         visualizer.setAccent(currentAccent);
 
-        Bitmap art = Art.get(this, s);
-        if (art != null) {
-            miniArt.setImageBitmap(art);
-            fullArt.setImageBitmap(art);
-            blurredArt.setImageBitmap(art);
-        } else {
-            miniArt.setImageDrawable(Glass.card(12));
-            fullArt.setImageDrawable(Glass.card(12));
+        String key = s == null || s.path == null ? "" : s.path;
+        if (!key.equals(artPathKey)) {
+            artPathKey = key;
+            Bitmap art = Art.get(this, s);
+            if (art != null) {
+                miniArt.setImageDrawable(Art.rounded(art, dp(14)));
+                fullArt.setImageDrawable(Art.rounded(art, dp(24)));
+                blurredArt.setImageBitmap(art);
+                backdropArt.setImageBitmap(art);
+            } else {
+                miniArt.setImageDrawable(Glass.card(dp(14)));
+                fullArt.setImageDrawable(Glass.card(dp(24)));
+                blurredArt.setImageDrawable(null);
+                backdropArt.setImageDrawable(null);
+            }
         }
 
         int dur = service.duration(), pos = service.position();
-        seekBar.setMax(Math.max(1, dur));
         fullSeek.setMax(Math.max(1, dur));
-        if (!userSeeking) { seekBar.setProgress(pos); fullSeek.setProgress(pos); }
-        elapsed.setText(Library.duration(pos));
-        total.setText(Library.duration(dur));
+        if (!userSeeking) fullSeek.setProgress(pos);
         fullElapsed.setText(Library.duration(pos));
         fullTotal.setText(Library.duration(dur));
         miniProgress.setScaleX(dur > 0 ? pos / (float) dur : 0f);
