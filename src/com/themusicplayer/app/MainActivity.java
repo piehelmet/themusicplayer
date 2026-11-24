@@ -80,7 +80,6 @@ public class MainActivity extends Activity {
     private AlbumGridAdapter gridAdapter;
 
     private AmbientBackground ambient;
-    private VisualizerView visualizer;
     private LinearLayout content, miniPlayer;
     private FrameLayout browseArea, playerOverlay;
     private ListView list;
@@ -97,7 +96,6 @@ public class MainActivity extends Activity {
     private final List<TextView> tabChips = new ArrayList<>();
     private String artPathKey = "";
     private ValueAnimator accentAnimator;
-    private boolean motionEnabled = true;
     private int sortIndex = 0;
     private int currentAccent = 0xFF5B8CFF;
 
@@ -454,13 +452,6 @@ public class MainActivity extends Activity {
         artWrap.addView(fullArt);
         sheet.addView(artWrap);
 
-        visualizer = new VisualizerView(this);
-        LinearLayout.LayoutParams vizParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(36));
-        vizParams.setMargins(0, dp(2), 0, dp(2));
-        visualizer.setLayoutParams(vizParams);
-        sheet.addView(visualizer);
-
         fullTitle = label("Nothing selected", 22, 0xFFFFFFFF);
         fullTitle.setGravity(Gravity.CENTER);
         fullTitle.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
@@ -550,7 +541,6 @@ public class MainActivity extends Activity {
     }
 
     private void animatePop(View v) {
-        if (!motionEnabled) return;
         v.animate().scaleX(1.08f).scaleY(1.08f).setDuration(110)
                 .setInterpolator(new OvershootInterpolator(2f))
                 .withEndAction(() -> v.animate().scaleX(1f).scaleY(1f).setDuration(140).start())
@@ -559,30 +549,21 @@ public class MainActivity extends Activity {
 
     private void openPlayer() {
         if (playerOverlay.getVisibility() == View.VISIBLE) return;
-        motionEnabled = false;
-        if (accentAnimator != null) accentAnimator.cancel();
-        ambient.setMotion(false);
-        visualizer.setMotion(false);
-        playerOverlay.setTranslationY(0f);
-        playerOverlay.setAlpha(1f);
         playerOverlay.setVisibility(View.VISIBLE);
+        playerOverlay.setTranslationY(dp(180));
+        playerOverlay.animate().alpha(1f).translationY(0f).setDuration(420)
+                .setInterpolator(new DecelerateInterpolator()).start();
         refresh();
     }
 
     private void closePlayer() {
-        motionEnabled = true;
-        ambient.setMotion(true);
-        visualizer.setMotion(true);
-        playerOverlay.setAlpha(1f);
-        playerOverlay.setTranslationY(0f);
-        playerOverlay.setVisibility(View.GONE);
-        refresh();
+        playerOverlay.animate().alpha(0f).translationY(dp(180)).setDuration(280)
+                .withEndAction(() -> playerOverlay.setVisibility(View.GONE)).start();
     }
 
     private void animateAccent(int accent) {
         int from = currentAccent;
         currentAccent = accent;
-        if (!motionEnabled) { applyAccent(accent); return; }
         accentAnimator = ValueAnimator.ofObject(new ArgbEvaluator(), from, accent);
         accentAnimator.setDuration(900);
         accentAnimator.addUpdateListener(a -> applyAccent((int) a.getAnimatedValue()));
@@ -1327,9 +1308,6 @@ public class MainActivity extends Activity {
         crossfadeButton.setText(crossOn ? "Crossfade ●" : "Crossfade");
         crossfadeButton.setBackground(Glass.chip(crossOn, currentAccent));
         crossfadeButton.setTextColor(crossOn ? 0xFF0B0D16 : 0xFFE4EAFF);
-
-        visualizer.setPlaying(playing);
-        visualizer.setAccent(currentAccent);
 
         String key = s == null || s.path == null ? "" : s.path;
         if (!key.equals(artPathKey)) {

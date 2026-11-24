@@ -35,13 +35,6 @@ public class AmbientBackground extends View {
         drift.start();
     }
 
-    /** Pause or resume the drifting orbs (used when the full player is open). */
-    public void setMotion(boolean on) {
-        drift.cancel();
-        if (on) drift.start();
-        else { phase = 0f; invalidate(); }
-    }
-
     public void setAccent(int color) {
         float[] hsv = new float[3];
         Color.colorToHSV(color, hsv);
