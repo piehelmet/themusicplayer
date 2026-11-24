@@ -13,6 +13,20 @@ adb install -r TheMusicPlayer.apk
 
 Package: `com.themusicplayer.app` · minSdk 21 · targetSdk 34
 
+## Releases
+
+Tagged builds with attached APKs are on the [GitHub Releases page](../../releases):
+
+- **v4.0** (latest) — optional visualizer, Ivory theme, original echo-play icon
+- **v3.2** — visualizer bars removed, other motion restored
+- **v3.1** — short-lived fully static now-playing experiment
+- **v3.0** — complete UI redesign
+- **v2.0** — first published feature build
+
+The raw `TheMusicPlayer.apk` on `main` always tracks the latest build. Historical APKs
+were rebuilt from their tagged commits and are debug-signed with the same key. The Android
+`versionName` remains `1.0`; release tags track UI milestones.
+
 ## Included in v2
 
 ### High-end interface (v4 refresh)
