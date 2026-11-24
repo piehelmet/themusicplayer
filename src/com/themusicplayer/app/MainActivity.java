@@ -26,7 +26,9 @@ import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.provider.MediaStore;
 import android.text.Editable;
 import android.text.TextUtils;
@@ -61,9 +63,11 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** Translucent, animated music player UI. */
@@ -113,6 +117,15 @@ public class MainActivity extends Activity {
     private boolean animateItems = true;
     private int dragFrom = -1;
     private int dragStartY = 0;
+
+    private final Handler searchHandler = new Handler(Looper.getMainLooper());
+    private final Runnable applySearch = this::rebuild;
+    private final Map<String, Integer> albumTrackCounts = new HashMap<>();
+    private final Map<String, Integer> artistTrackCounts = new HashMap<>();
+    private final Map<String, Integer> artistAlbumCounts = new HashMap<>();
+    private final Set<Integer> animatedRows = new HashSet<>();
+    private Drawable placeholderArt;
+    private int placeholderTheme = -1;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
@@ -297,7 +310,7 @@ public class MainActivity extends Activity {
         if (playerOverlay != null) playerOverlay.animate().cancel();
         artPathKey = "";
         buildUi();
-        searchBox.setText(query);
+        setQuery(query);
         if (playerWasOpen) openPlayer();
         toast(Theme.name() + " theme");
     }
@@ -343,7 +356,7 @@ public class MainActivity extends Activity {
         header.addView(iconButton("⋯", 19, false, v -> showMainMenu(v)));
         content.addView(header);
 
-        // A fine editorial rule is the signature of the Ivory theme.
+        // A fine rule is the signature of the light themes.
         if (Theme.isLight()) {
             View rule = new View(this);
             rule.setBackgroundColor(Theme.rule());
@@ -371,7 +384,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         searchBox.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
-            public void onTextChanged(CharSequence s, int a, int b, int c) { rebuild(); }
+            public void onTextChanged(CharSequence s, int a, int b, int c) { scheduleSearch(); }
             public void afterTextChanged(Editable s) {}
         });
         searchBar.addView(searchBox);
@@ -410,7 +423,7 @@ public class MainActivity extends Activity {
         for (final String t : tabs) {
             TextView c = chip(t, t.equals(tab), v -> {
                 tab = t;
-                searchBox.setText("");
+                setQuery("");
                 sortIndex = 0;
                 updateSortLabel();
                 updateTabs();
@@ -763,9 +776,42 @@ public class MainActivity extends Activity {
         return out;
     }
 
+    private void scheduleSearch() {
+        searchHandler.removeCallbacks(applySearch);
+        searchHandler.postDelayed(applySearch, 120);
+    }
+
+    private void setQuery(String value) {
+        if (searchBox == null) return;
+        searchHandler.removeCallbacks(applySearch);
+        searchBox.setText(value);
+        searchHandler.removeCallbacks(applySearch);
+    }
+
+    private void buildGroupCounts() {
+        albumTrackCounts.clear();
+        artistTrackCounts.clear();
+        artistAlbumCounts.clear();
+        Map<String, Set<String>> albumsByArtist = new HashMap<>();
+        for (Song s : allSongs) {
+            String album = Library.albumKey(s);
+            String artist = Library.artistKey(s);
+            Integer tracks = albumTrackCounts.get(album);
+            albumTrackCounts.put(album, tracks == null ? 1 : tracks + 1);
+            Integer artistTracks = artistTrackCounts.get(artist);
+            artistTrackCounts.put(artist, artistTracks == null ? 1 : artistTracks + 1);
+            Set<String> albums = albumsByArtist.get(artist);
+            if (albums == null) { albums = new HashSet<>(); albumsByArtist.put(artist, albums); }
+            albums.add(album);
+        }
+        for (Map.Entry<String, Set<String>> e : albumsByArtist.entrySet())
+            artistAlbumCounts.put(e.getKey(), e.getValue().size());
+    }
+
     private void loadLibrary() {
         allSongs.clear();
         allSongs.addAll(Library.exclude(Library.load(this), excludedFolders()));
+        buildGroupCounts();
         if (allSongs.isEmpty())
             toast("No music found. Add audio files or check excluded folders.");
         animateItems = true;
@@ -799,6 +845,7 @@ public class MainActivity extends Activity {
 
     private void rebuild() {
         viewSongs.clear();
+        animatedRows.clear();
         updateSortLabel();
         String q = searchBox == null ? "" : searchBox.getText().toString();
 
@@ -936,12 +983,20 @@ public class MainActivity extends Activity {
     private String rowSubtitle(Song s) {
         if (s == null) return "";
         String artist = nonEmpty(s.artist, "<unknown>");
-        if ("Albums".equals(tab))
-            return artist + "  ·  " + count(Library.albumTracks(allSongs, s), "track");
-        if ("Artists".equals(tab))
-            return count(Library.artistAlbums(allSongs, s), "album") + "  ·  "
-                    + count(Library.artistTracks(allSongs, s), "track");
-        if ("Folders".equals(tab)) return artist + "  ·  " + Library.duration(s.durationMs);
+        if ("Albums".equals(tab)) {
+            String key = Library.albumKey(s);
+            Integer tracks = albumTrackCounts.get(key);
+            if (tracks == null) tracks = Library.albumTracks(allSongs, s);
+            return artist + "  ·  " + count(tracks, "track");
+        }
+        if ("Artists".equals(tab)) {
+            String key = Library.artistKey(s);
+            Integer albums = artistAlbumCounts.get(key);
+            Integer tracks = artistTrackCounts.get(key);
+            if (albums == null) albums = Library.artistAlbums(allSongs, s);
+            if (tracks == null) tracks = Library.artistTracks(allSongs, s);
+            return count(albums, "album") + "  ·  " + count(tracks, "track");
+        }
         return artist + "  ·  " + Library.duration(s.durationMs);
     }
 
@@ -955,52 +1010,73 @@ public class MainActivity extends Activity {
         return false;
     }
 
+    private static class RowViews {
+        ImageView art;
+        TextView title;
+        TextView sub;
+        TextView chevron;
+        View rule;
+        boolean active;
+        int accent;
+    }
+
     private class SongListAdapter extends BaseAdapter {
         @Override public int getCount() { return viewSongs.size(); }
         @Override public Song getItem(int pos) { return viewSongs.get(pos); }
         @Override public long getItemId(int pos) { return pos; }
 
         @Override public View getView(int pos, View convertView, ViewGroup parent) {
-            LinearLayout v = convertView == null ? row(LinearLayout.HORIZONTAL)
-                    : (LinearLayout) convertView;
-            if (convertView == null) {
-                v.setBackground(Glass.card(16));
+            LinearLayout v = (LinearLayout) convertView;
+            RowViews h;
+            if (v == null) {
+                v = row(LinearLayout.HORIZONTAL);
                 v.setPadding(dp(8), dp(7), dp(10), dp(7));
-                ImageView art = new ImageView(MainActivity.this);
-                art.setId(1);
-                art.setLayoutParams(new LinearLayout.LayoutParams(dp(54), dp(54)));
-                art.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                v.addView(art);
+                h = new RowViews();
+                h.art = new ImageView(MainActivity.this);
+                h.art.setLayoutParams(new LinearLayout.LayoutParams(dp(54), dp(54)));
+                h.art.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                v.addView(h.art);
                 LinearLayout texts = row(LinearLayout.VERTICAL);
-                texts.setId(2);
                 texts.setLayoutParams(new LinearLayout.LayoutParams(0,
                         ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
                 texts.setPadding(dp(12), dp(2), dp(4), dp(2));
-                TextView title = label("", 15, Theme.textPrimary());
-                title.setId(3);
-                title.setMaxLines(1);
-                title.setTypeface(Theme.display());
-                TextView sub = label("", 12, Theme.sub());
-                sub.setId(4);
-                sub.setMaxLines(1);
-                texts.addView(title);
-                texts.addView(sub);
+                h.title = label("", 15, Theme.textPrimary());
+                h.title.setMaxLines(1);
+                h.title.setTypeface(Theme.display());
+                h.sub = label("", 12, Theme.sub());
+                h.sub.setMaxLines(1);
+                texts.addView(h.title);
+                texts.addView(h.sub);
+                h.rule = new View(MainActivity.this);
+                h.rule.setBackgroundColor(Theme.rule());
+                LinearLayout.LayoutParams ruleParams = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+                ruleParams.topMargin = dp(5);
+                h.rule.setLayoutParams(ruleParams);
+                texts.addView(h.rule);
                 v.addView(texts);
-                TextView chevron = label("›", 18, Theme.muted());
-                chevron.setId(5);
-                chevron.setGravity(Gravity.CENTER);
-                v.addView(chevron);
+                h.chevron = label("›", 18, Theme.muted());
+                h.chevron.setGravity(Gravity.CENTER);
+                v.addView(h.chevron);
+                v.setTag(h);
+            } else {
+                h = (RowViews) v.getTag();
             }
             Song s = getItem(pos);
             boolean active = rowActive(s);
-            v.setBackground(active ? Glass.activeCard(currentAccent, 16) : Glass.card(16));
-            ((ImageView) v.findViewById(1)).setImageDrawable(drawableFor(s));
-            TextView title = (TextView) v.findViewById(3);
-            title.setText(rowTitle(s));
-            title.setTextColor(active ? Theme.activeText() : Theme.textPrimary());
-            ((TextView) v.findViewById(5)).setTextColor(active ? Theme.activeText() : Theme.muted());
-            ((TextView) v.findViewById(4)).setText(rowSubtitle(s));
-            if (animateItems && pos < 12) {
+            if (h.active != active || h.accent != currentAccent) {
+                h.active = active;
+                h.accent = currentAccent;
+                v.setBackground(active ? Glass.activeCard(currentAccent, 16) : Glass.card(16));
+            }
+            if (h.rule != null)
+                h.rule.setVisibility(Theme.mode() == Theme.PORCELAIN ? View.VISIBLE : View.GONE);
+            h.art.setImageDrawable(drawableFor(s));
+            h.title.setText(rowTitle(s));
+            h.title.setTextColor(active ? Theme.activeText() : Theme.textPrimary());
+            h.chevron.setTextColor(active ? Theme.activeText() : Theme.muted());
+            h.sub.setText(rowSubtitle(s));
+            if (animateItems && pos < 12 && animatedRows.add(pos)) {
                 v.setAlpha(0f);
                 v.setTranslationX(dp(24));
                 v.animate().alpha(1f).translationX(0f)
@@ -1017,39 +1093,51 @@ public class MainActivity extends Activity {
         @Override public long getItemId(int pos) { return pos; }
 
         @Override public View getView(int pos, View convertView, ViewGroup parent) {
-            LinearLayout v = convertView == null ? row(LinearLayout.VERTICAL)
-                    : (LinearLayout) convertView;
-            if (convertView == null) {
-                v.setBackground(Glass.card(20));
+            LinearLayout v = (LinearLayout) convertView;
+            RowViews h;
+            if (v == null) {
+                v = row(LinearLayout.VERTICAL);
                 v.setPadding(dp(7), dp(7), dp(7), dp(10));
-                ImageView art = new ImageView(MainActivity.this);
-                art.setId(1);
-                art.setLayoutParams(new LinearLayout.LayoutParams(
+                h = new RowViews();
+                h.art = new ImageView(MainActivity.this);
+                h.art.setLayoutParams(new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, dp(150)));
-                art.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                v.addView(art);
-                TextView title = label("", 13, Theme.textPrimary());
-                title.setId(2);
-                title.setGravity(Gravity.CENTER);
-                title.setMaxLines(1);
-                title.setPadding(dp(4), dp(8), dp(4), 0);
-                title.setTypeface(Theme.display());
-                v.addView(title);
+                h.art.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                v.addView(h.art);
+                h.title = label("", 13, Theme.textPrimary());
+                h.title.setGravity(Gravity.CENTER);
+                h.title.setMaxLines(1);
+                h.title.setPadding(dp(4), dp(8), dp(4), 0);
+                h.title.setTypeface(Theme.display());
+                v.addView(h.title);
+                v.setTag(h);
+            } else {
+                h = (RowViews) v.getTag();
             }
             Song s = getItem(pos);
             boolean active = rowActive(s);
-            v.setBackground(active ? Glass.activeCard(currentAccent, 20) : Glass.card(20));
-            ((ImageView) v.findViewById(1)).setImageDrawable(drawableFor(s));
-            TextView title = (TextView) v.findViewById(2);
-            title.setText(rowTitle(s));
-            title.setTextColor(active ? Theme.activeText() : Theme.textPrimary());
+            if (h.active != active || h.accent != currentAccent) {
+                h.active = active;
+                h.accent = currentAccent;
+                v.setBackground(active ? Glass.activeCard(currentAccent, 20) : Glass.card(20));
+            }
+            h.art.setImageDrawable(drawableFor(s));
+            h.title.setText(rowTitle(s));
+            h.title.setTextColor(active ? Theme.activeText() : Theme.textPrimary());
             return v;
         }
     }
 
     private Drawable drawableFor(Song s) {
         Bitmap b = Art.get(this, s);
-        return b == null ? Glass.card(12) : Art.rounded(b, dp(12));
+        if (b == null) {
+            if (placeholderArt == null || placeholderTheme != Theme.mode()) {
+                placeholderArt = Glass.card(dp(12));
+                placeholderTheme = Theme.mode();
+            }
+            return placeholderArt;
+        }
+        return Art.roundedCached(b, dp(12), s == null || s.path == null ? "" : s.path);
     }
 
     // ---------------------------------------------------------- Menus
@@ -1418,7 +1506,7 @@ public class MainActivity extends Activity {
     private void about() {
         new AlertDialog.Builder(this).setTitle("The music player")
                 .setMessage("An original, offline music player.\n\n"
-                        + "High-end translucent UI with Obsidian, Ivory and Aurora themes, "
+                        + "High-end translucent UI with Obsidian, Ivory, Aurora and Porcelain themes, "
                         + "optional spectrum visualizer, animated ambient backgrounds, "
                         + "album art, crossfade, ReplayGain, equalizer, playlists, "
                         + "queue, lyrics, sleep timer, widgets and media controls.\n\n"
@@ -1533,8 +1621,8 @@ public class MainActivity extends Activity {
             artPathKey = key;
             Bitmap art = Art.get(this, s);
             if (art != null) {
-                miniArt.setImageDrawable(Art.rounded(art, dp(14)));
-                fullArt.setImageDrawable(Art.rounded(art, dp(24)));
+                miniArt.setImageDrawable(Art.roundedCached(art, dp(14), key));
+                fullArt.setImageDrawable(Art.roundedCached(art, dp(24), key));
                 blurredArt.setImageBitmap(art);
                 backdropArt.setImageBitmap(art);
             } else {

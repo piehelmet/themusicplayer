@@ -82,39 +82,32 @@ public final class Library {
         return empty(a).trim().compareToIgnoreCase(empty(b).trim());
     }
 
-    /** One representative song per album, with a deterministic representative. */
+    /** One representative song per album. Input is already title-ordered by MediaStore. */
     public static List<Song> groupByAlbum(List<Song> all) {
-        List<Song> ordered = new ArrayList<>(all);
-        sort(ordered, Sort.ALBUM, Sort.TITLE);
         Map<String, Song> seen = new LinkedHashMap<>();
-        for (Song s : ordered) seen.putIfAbsent(key(s.album, s.artist), s);
+        for (Song s : all) seen.putIfAbsent(albumKey(s), s);
         return new ArrayList<>(seen.values());
     }
 
-    /** One representative song per artist, with a deterministic representative. */
+    /** One representative song per artist. Input is already title-ordered by MediaStore. */
     public static List<Song> groupByArtist(List<Song> all) {
-        List<Song> ordered = new ArrayList<>(all);
-        sort(ordered, Sort.ARTIST, Sort.ALBUM);
         Map<String, Song> seen = new LinkedHashMap<>();
-        for (Song s : ordered) seen.putIfAbsent(normalize(s.artist), s);
+        for (Song s : all) seen.putIfAbsent(artistKey(s), s);
         return new ArrayList<>(seen.values());
     }
 
-    private static String key(String a, String b) { return normalize(a) + "|" + normalize(b); }
+    public static String albumKey(Song s) { return s == null ? "" : s.albumKey; }
 
-    private static String normalize(String s) {
-        String v = empty(s).trim();
-        return v.isEmpty() ? "<unknown>" : v.toLowerCase(Locale.ROOT);
-    }
+    public static String artistKey(Song s) { return s == null ? "" : s.artistKey; }
 
     private static String empty(String s) { return s == null ? "" : s; }
 
     public static boolean sameAlbum(Song a, Song b) {
-        return a != null && b != null && key(a.album, a.artist).equals(key(b.album, b.artist));
+        return a != null && b != null && albumKey(a).equals(albumKey(b));
     }
 
     public static boolean sameArtist(Song a, Song b) {
-        return a != null && b != null && normalize(a.artist).equals(normalize(b.artist));
+        return a != null && b != null && artistKey(a).equals(artistKey(b));
     }
 
     public static List<Song> ofAlbum(List<Song> all, Song picked) {
@@ -141,7 +134,7 @@ public final class Library {
 
     public static int artistAlbums(List<Song> all, Song picked) {
         Set<String> albums = new HashSet<>();
-        for (Song s : all) if (sameArtist(s, picked)) albums.add(key(s.album, s.artist));
+        for (Song s : all) if (sameArtist(s, picked)) albums.add(s.albumKey);
         return albums.size();
     }
 
@@ -161,12 +154,9 @@ public final class Library {
 
     public static List<Song> filter(List<Song> all, String query) {
         if (query == null || query.trim().isEmpty()) return all;
-        String q = query.trim().toLowerCase();
+        String q = query.trim().toLowerCase(Locale.ROOT);
         List<Song> out = new ArrayList<>();
-        for (Song s : all)
-            if (contains(s.title, q) || contains(s.artist, q) || contains(s.album, q)
-                    || contains(s.fileName, q) || contains(s.folder, q))
-                out.add(s);
+        for (Song s : all) if (s.searchKey.contains(q)) out.add(s);
         return out;
     }
 
@@ -176,10 +166,6 @@ public final class Library {
         for (Song s : all)
             if (!excludedFolders.contains(s.folder)) out.add(s);
         return out;
-    }
-
-    private static boolean contains(String value, String q) {
-        return value != null && value.toLowerCase().contains(q);
     }
 
     public static List<String> genres(Context context) {

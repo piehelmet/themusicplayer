@@ -16,6 +16,7 @@ import java.io.File;
 /** Embedded album art loader with a small memory cache and colour extraction. */
 public final class Art {
     private static final LruCache<String, Bitmap> CACHE = new LruCache<>(48);
+    private static final LruCache<String, Drawable> ROUNDED = new LruCache<>(64);
 
     private Art() {}
 
@@ -89,6 +90,16 @@ public final class Art {
         }
     }
 
+    /** Reuses rounded covers across recycled list rows; same artwork/radius is identical. */
+    public static Drawable roundedCached(Bitmap bitmap, float radius, String key) {
+        String cacheKey = key + "|" + radius;
+        Drawable hit = ROUNDED.get(cacheKey);
+        if (hit != null) return hit;
+        Drawable made = rounded(bitmap, radius);
+        ROUNDED.put(cacheKey, made);
+        return made;
+    }
+
     public static Drawable rounded(Bitmap bitmap, float radius) {
         if (bitmap == null) return new BitmapDrawable(placeholder(null));
         Bitmap out = Bitmap.createBitmap(bitmap.getWidth(), bitmap.getHeight(), Bitmap.Config.ARGB_8888);
@@ -103,5 +114,8 @@ public final class Art {
         return d;
     }
 
-    public static void clear(String path) { if (path != null) CACHE.remove(path); }
+    public static void clear(String path) {
+        if (path != null) CACHE.remove(path);
+        ROUNDED.evictAll();
+    }
 }
