@@ -1,9 +1,8 @@
 package com.themusicplayer.app;
 
-import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 
-/** Factory for frosted-glass style drawables. */
+/** Factory for frosted-glass style drawables in either UI theme. */
 public final class Glass {
     private Glass() {}
 
@@ -11,15 +10,15 @@ public final class Glass {
         GradientDrawable d = new GradientDrawable();
         d.setShape(GradientDrawable.RECTANGLE);
         d.setCornerRadius(radius);
-        d.setColor(Color.argb(34, 255, 255, 255));
-        d.setStroke(1, Color.argb(46, 255, 255, 255));
+        d.setColor(Theme.cardFill());
+        d.setStroke(1, Theme.cardStroke());
         return d;
     }
 
     public static GradientDrawable card(int accent, float radius) {
         GradientDrawable d = card(radius);
-        d.setColor(Color.argb(24, Color.red(accent), Color.green(accent), Color.blue(accent)));
-        d.setStroke(1, Color.argb(60, Color.red(accent), Color.green(accent), Color.blue(accent)));
+        d.setColor(Theme.accentCardFill(accent));
+        d.setStroke(1, Theme.accentCardStroke(accent));
         return d;
     }
 
@@ -27,8 +26,8 @@ public final class Glass {
         GradientDrawable d = new GradientDrawable();
         d.setShape(GradientDrawable.RECTANGLE);
         d.setCornerRadius(999f);
-        d.setColor(Color.argb(44, Color.red(accent), Color.green(accent), Color.blue(accent)));
-        d.setStroke(1, Color.argb(90, Color.red(accent), Color.green(accent), Color.blue(accent)));
+        d.setColor(Theme.circleFill(false, accent));
+        d.setStroke(1, Theme.circleStroke(false, accent));
         return d;
     }
 
@@ -37,9 +36,8 @@ public final class Glass {
         GradientDrawable d = new GradientDrawable();
         d.setShape(GradientDrawable.RECTANGLE);
         d.setCornerRadius(999f);
-        int r = Color.red(accent), g = Color.green(accent), b = Color.blue(accent);
-        d.setColor(selected ? Color.rgb(r, g, b) : Color.argb(26, 255, 255, 255));
-        d.setStroke(1, selected ? Color.argb(220, r, g, b) : Color.argb(40, 255, 255, 255));
+        d.setColor(Theme.chipFill(selected, accent));
+        d.setStroke(1, Theme.chipStroke(selected, accent));
         return d;
     }
 
@@ -47,9 +45,8 @@ public final class Glass {
     public static GradientDrawable circle(boolean filled, int accent) {
         GradientDrawable d = new GradientDrawable();
         d.setShape(GradientDrawable.OVAL);
-        int r = Color.red(accent), g = Color.green(accent), b = Color.blue(accent);
-        d.setColor(filled ? Color.rgb(r, g, b) : Color.argb(30, 255, 255, 255));
-        d.setStroke(filled ? 0 : 1, Color.argb(70, r, g, b));
+        d.setColor(Theme.circleFill(filled, accent));
+        d.setStroke(filled ? 0 : 1, Theme.circleStroke(filled, accent));
         return d;
     }
 
@@ -58,8 +55,8 @@ public final class Glass {
         GradientDrawable d = new GradientDrawable();
         d.setShape(GradientDrawable.RECTANGLE);
         d.setCornerRadii(new float[]{radius, radius, radius, radius, 0, 0, 0, 0});
-        d.setColor(0xF2121420);
-        d.setStroke(1, 0x22FFFFFF);
+        d.setColor(Theme.sheetFill());
+        d.setStroke(1, Theme.sheetStroke());
         return d;
     }
 
@@ -68,7 +65,7 @@ public final class Glass {
         GradientDrawable d = new GradientDrawable();
         d.setShape(GradientDrawable.RECTANGLE);
         d.setCornerRadius(999f);
-        d.setColor(0x66FFFFFF);
+        d.setColor(Theme.handle());
         return d;
     }
 }

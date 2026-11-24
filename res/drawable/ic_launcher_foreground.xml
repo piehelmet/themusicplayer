@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Original mark: sound echoes converging into a play wedge. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:pathData="M 40,32 C 17,44 17,64 40,76"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#9CC8A96A"
+        android:strokeWidth="3"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M 48,39 C 30,47 30,61 48,69"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#D6C8A96A"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M 56,45 C 43,50 43,58 56,63"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#F2F1E3C6"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M 63,38 L 63,70 L 86,54 Z"
+        android:fillColor="#F6E8C9" />
+</vector>

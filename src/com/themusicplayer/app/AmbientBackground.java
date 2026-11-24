@@ -38,8 +38,17 @@ public class AmbientBackground extends View {
     public void setAccent(int color) {
         float[] hsv = new float[3];
         Color.colorToHSV(color, hsv);
-        accent = Color.HSVToColor(0xFF, new float[]{(hsv[0] + 355) % 360, 0.55f, 0.34f});
-        accent2 = Color.HSVToColor(0xFF, new float[]{(hsv[0] + 45) % 360, 0.65f, 0.24f});
+        if (Theme.isLight()) {
+            accent = Color.HSVToColor(0xFF,
+                    new float[]{hsv[0], Math.min(hsv[1], 0.30f), 0.88f});
+            accent2 = Color.HSVToColor(0xFF,
+                    new float[]{(hsv[0] + 28) % 360, 0.20f, 0.82f});
+        } else {
+            accent = Color.HSVToColor(0xFF,
+                    new float[]{(hsv[0] + 355) % 360, 0.55f, 0.34f});
+            accent2 = Color.HSVToColor(0xFF,
+                    new float[]{(hsv[0] + 45) % 360, 0.65f, 0.24f});
+        }
         invalidate();
     }
 
@@ -47,21 +56,22 @@ public class AmbientBackground extends View {
         super.onDraw(c);
         int w = getWidth(), h = getHeight();
         if (w == 0 || h == 0) return;
-        paint.setShader(new LinearGradient(0, 0, w, h, 0xFF08090E, 0xFF121423, Shader.TileMode.CLAMP));
+        paint.setShader(new LinearGradient(0, 0, w, h, Theme.gradientStart(),
+                Theme.gradientEnd(), Shader.TileMode.CLAMP));
         c.drawRect(0, 0, w, h, paint);
 
         float ax = w * (0.25f + 0.18f * (float) Math.sin(phase));
         float ay = h * (0.18f + 0.12f * (float) Math.cos(phase * 0.8f));
-        drawOrb(c, ax, ay, Math.max(w, h) * 0.62f, Color.argb(150,
+        drawOrb(c, ax, ay, Math.max(w, h) * 0.62f, Color.argb(Theme.orbAlpha(0),
                 Color.red(accent), Color.green(accent), Color.blue(accent)));
 
         float bx = w * (0.78f + 0.15f * (float) Math.cos(phase * 0.7f));
         float by = h * (0.72f + 0.14f * (float) Math.sin(phase * 1.1f));
-        drawOrb(c, bx, by, Math.max(w, h) * 0.55f, Color.argb(120,
+        drawOrb(c, bx, by, Math.max(w, h) * 0.55f, Color.argb(Theme.orbAlpha(1),
                 Color.red(accent2), Color.green(accent2), Color.blue(accent2)));
 
         paint.setShader(null);
-        paint.setColor(0x08000000);
+        paint.setColor(Theme.isLight() ? 0x05FFFFFF : 0x08000000);
         c.drawRect(0, 0, w, h, paint);
     }
 

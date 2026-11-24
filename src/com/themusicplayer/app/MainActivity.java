@@ -20,7 +20,6 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.RenderEffect;
 import android.graphics.Shader;
-import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
@@ -40,7 +39,6 @@ import android.view.animation.OvershootInterpolator;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.BaseAdapter;
-import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -80,6 +78,7 @@ public class MainActivity extends Activity {
     private AlbumGridAdapter gridAdapter;
 
     private AmbientBackground ambient;
+    private VisualizerView visualizer;
     private LinearLayout content, miniPlayer;
     private FrameLayout browseArea, playerOverlay;
     private ListView list;
@@ -88,7 +87,7 @@ public class MainActivity extends Activity {
     private ScrollView lyricsScroll;
     private EditText searchBox;
     private TextView playlistPicker, genrePicker, gridToggle, playButton, miniPlay;
-    private TextView sortButton, shuffleButton, repeatButton, crossfadeButton;
+    private TextView sortButton, shuffleButton, repeatButton, crossfadeButton, visualizerButton;
     private TextView fullTitle, fullArtist, fullElapsed, fullTotal, fullLyrics;
     private SeekBar fullSeek;
     private ImageView miniArt, fullArt, blurredArt, backdropArt;
@@ -96,8 +95,9 @@ public class MainActivity extends Activity {
     private final List<TextView> tabChips = new ArrayList<>();
     private String artPathKey = "";
     private ValueAnimator accentAnimator;
+    private boolean visualizerOn = false;
     private int sortIndex = 0;
-    private int currentAccent = 0xFF5B8CFF;
+    private int currentAccent = Theme.baseAccent();
 
     private Playlists playlists;
     private SharedPreferences settings;
@@ -119,7 +119,8 @@ public class MainActivity extends Activity {
 
     private final BroadcastReceiver updateReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
-            int accent = intent.getIntExtra(MusicService.EXTRA_ACCENT, currentAccent);
+            int accent = Theme.accent(intent.getIntExtra(
+                    MusicService.EXTRA_ACCENT, currentAccent));
             if (accent != currentAccent) animateAccent(accent);
             refresh();
             if ("Lyrics".equals(tab)) refreshLyrics();
@@ -130,6 +131,8 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         playlists = new Playlists(this);
         settings = getSharedPreferences("tmp_settings", MODE_PRIVATE);
+        Theme.set(settings.getInt("theme", Theme.OBSIDIAN));
+        visualizerOn = settings.getBoolean("visualizer_on", false);
         buildUi();
         requestPermissionsIfNeeded();
         bindService(new Intent(this, MusicService.class), connection, BIND_AUTO_CREATE);
@@ -157,14 +160,15 @@ public class MainActivity extends Activity {
     }
 
     private TextView section(String text) {
-        TextView tv = label(text, 10, 0x99C6D2FF);
+        TextView tv = label(text, 10, Theme.section());
         tv.setLetterSpacing(0.2f);
         return tv;
     }
 
     /** Modern rounded chip; no default Android button chrome. */
     private TextView chip(String text, boolean selected, View.OnClickListener click) {
-        TextView tv = label(text, 12, selected ? 0xFF0B0D16 : 0xFFE4EAFF);
+        TextView tv = label(text, 12, Theme.chipText(selected));
+        tv.setTag(selected);
         tv.setBackground(Glass.chip(selected, currentAccent));
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(dp(16), dp(9), dp(16), dp(9));
@@ -177,13 +181,16 @@ public class MainActivity extends Activity {
     }
 
     private void setChipSelected(TextView chip, boolean selected) {
+        if (chip == null) return;
+        if (Boolean.TRUE.equals(chip.getTag()) == selected) return;
+        chip.setTag(selected);
         chip.setBackground(Glass.chip(selected, currentAccent));
-        chip.setTextColor(selected ? 0xFF0B0D16 : 0xFFE4EAFF);
+        chip.setTextColor(Theme.chipText(selected));
     }
 
     /** Circular icon button built from a TextView, so it never looks like a stock Button. */
     private TextView iconButton(String glyph, float size, boolean filled, View.OnClickListener click) {
-        TextView tv = label(glyph, size, filled ? 0xFF0B0D16 : 0xFFFFFFFF);
+        TextView tv = label(glyph, size, filled ? Theme.onAccent() : Theme.textPrimary());
         tv.setGravity(Gravity.CENTER);
         tv.setBackground(Glass.circle(filled, currentAccent));
         int d = dp(Math.round(size * 2.5f));
@@ -213,16 +220,38 @@ public class MainActivity extends Activity {
             setChipSelected(chip, chip.getText().toString().equals(tab));
     }
 
+    private void applyVisualizerState() {
+        if (visualizerButton != null) {
+            visualizerButton.setText(visualizerOn ? "Visualizer ✓" : "Visualizer");
+            setChipSelected(visualizerButton, visualizerOn);
+        }
+        if (visualizer != null)
+            visualizer.setVisibility(visualizerOn ? View.VISIBLE : View.GONE);
+    }
+
+    private void toggleVisualizer() {
+        visualizerOn = !visualizerOn;
+        settings.edit().putBoolean("visualizer_on", visualizerOn).apply();
+        applyVisualizerState();
+        if (service != null) refresh();
+        toast(visualizerOn ? "Visualizer on" : "Visualizer off");
+    }
+
+    private void switchTheme() {
+        settings.edit().putInt("theme", Theme.next()).apply();
+        recreate();
+    }
+
     private void buildUi() {
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(0xFF08090E);
+        root.setBackgroundColor(Theme.root());
 
         // Immersive, blurred artwork behind the whole library.
         backdropArt = new ImageView(this);
         backdropArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
         if (Build.VERSION.SDK_INT >= 31)
             backdropArt.setRenderEffect(RenderEffect.createBlurEffect(64f, 64f, Shader.TileMode.CLAMP));
-        backdropArt.setAlpha(0.20f);
+        backdropArt.setAlpha(Theme.backdropAlpha());
         root.addView(backdropArt, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -240,8 +269,9 @@ public class MainActivity extends Activity {
         titles.setLayoutParams(new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         titles.addView(section("YOUR LIBRARY"));
-        TextView brand = label("The music player", 22, 0xFFFFFFFF);
-        brand.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        TextView brand = label("The music player", 22, Theme.textPrimary());
+        brand.setTypeface(Theme.display());
+        brand.setLetterSpacing(Theme.isLight() ? 0.03f : 0f);
         titles.addView(brand);
         header.addView(titles);
         gridToggle = iconButton("▦", 17, false, v -> {
@@ -253,16 +283,27 @@ public class MainActivity extends Activity {
         header.addView(iconButton("⋯", 19, false, v -> showMainMenu(v)));
         content.addView(header);
 
+        // A fine editorial rule is the signature of the Ivory theme.
+        if (Theme.isLight()) {
+            View rule = new View(this);
+            rule.setBackgroundColor(Theme.rule());
+            LinearLayout.LayoutParams ruleParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+            ruleParams.setMargins(0, dp(8), 0, 0);
+            rule.setLayoutParams(ruleParams);
+            content.addView(rule);
+        }
+
         // Search field
         LinearLayout searchBar = row(LinearLayout.HORIZONTAL);
         searchBar.setBackground(Glass.card(20));
         searchBar.setPadding(dp(14), dp(2), dp(14), dp(2));
         searchBar.setGravity(Gravity.CENTER_VERTICAL);
-        searchBar.addView(label("⌕", 18, 0x9FB4FF));
+        searchBar.addView(label("⌕", 18, Theme.icon()));
         searchBox = new EditText(this);
         searchBox.setHint("Search songs, artists, albums");
-        searchBox.setTextColor(0xFFFFFFFF);
-        searchBox.setHintTextColor(0x8C9BBF);
+        searchBox.setTextColor(Theme.textPrimary());
+        searchBox.setHintTextColor(Theme.hint());
         searchBox.setBackground(null);
         searchBox.setSingleLine(true);
         searchBox.setPadding(dp(10), dp(10), dp(4), dp(10));
@@ -342,7 +383,7 @@ public class MainActivity extends Activity {
 
         lyricsScroll = new ScrollView(this);
         lyricsScroll.setVisibility(View.GONE);
-        lyricsPane = label("", 14, 0xFFE8ECFF);
+        lyricsPane = label("", 14, Theme.lyrics());
         lyricsPane.setLineSpacing(dp(6), 1f);
         lyricsPane.setPadding(dp(8), dp(8), dp(8), dp(8));
         lyricsScroll.addView(lyricsPane);
@@ -368,10 +409,10 @@ public class MainActivity extends Activity {
         meta.setLayoutParams(new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         meta.setPadding(dp(12), 0, dp(6), 0);
-        miniTitle = label("Nothing selected", 15, 0xFFFFFFFF);
+        miniTitle = label("Nothing selected", 15, Theme.textPrimary());
         miniTitle.setMaxLines(1);
-        miniTitle.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-        miniSub = label("Tap to open player", 12, 0xA9B6D6);
+        miniTitle.setTypeface(Theme.display());
+        miniSub = label("Tap to open player", 12, Theme.sub());
         miniSub.setMaxLines(1);
         meta.addView(miniTitle);
         meta.addView(miniSub);
@@ -396,12 +437,13 @@ public class MainActivity extends Activity {
         buildPlayerOverlay(root);
         setContentView(root);
         updateTabs();
+        applyVisualizerState();
         rebuild();
     }
 
     private void buildPlayerOverlay(FrameLayout root) {
         playerOverlay = new FrameLayout(this);
-        playerOverlay.setBackgroundColor(0xC6080A12);
+        playerOverlay.setBackgroundColor(Theme.overlay());
         playerOverlay.setVisibility(View.GONE);
         playerOverlay.setAlpha(0f);
 
@@ -409,7 +451,7 @@ public class MainActivity extends Activity {
         blurredArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
         if (Build.VERSION.SDK_INT >= 31)
             blurredArt.setRenderEffect(RenderEffect.createBlurEffect(60f, 60f, Shader.TileMode.CLAMP));
-        blurredArt.setAlpha(0.26f);
+        blurredArt.setAlpha(Theme.blurAlpha());
         playerOverlay.addView(blurredArt, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -452,12 +494,20 @@ public class MainActivity extends Activity {
         artWrap.addView(fullArt);
         sheet.addView(artWrap);
 
-        fullTitle = label("Nothing selected", 22, 0xFFFFFFFF);
+        visualizer = new VisualizerView(this);
+        LinearLayout.LayoutParams vizParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(36));
+        vizParams.setMargins(0, dp(2), 0, dp(2));
+        visualizer.setLayoutParams(vizParams);
+        visualizer.setAccent(currentAccent);
+        sheet.addView(visualizer);
+
+        fullTitle = label("Nothing selected", 22, Theme.textPrimary());
         fullTitle.setGravity(Gravity.CENTER);
-        fullTitle.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        fullTitle.setTypeface(Theme.display());
         fullTitle.setPadding(dp(24), dp(4), dp(24), 0);
         sheet.addView(fullTitle);
-        fullArtist = label("", 14, 0xB7C3E4);
+        fullArtist = label("", 14, Theme.sub());
         fullArtist.setGravity(Gravity.CENTER);
         fullArtist.setPadding(dp(24), dp(2), dp(24), dp(8));
         sheet.addView(fullArtist);
@@ -480,8 +530,8 @@ public class MainActivity extends Activity {
         sheet.addView(fullSeek);
         LinearLayout times = row(LinearLayout.HORIZONTAL);
         times.setPadding(dp(22), 0, dp(22), 0);
-        fullElapsed = label("0:00", 11, 0x9FAED2);
-        fullTotal = label("0:00", 11, 0x9FAED2);
+        fullElapsed = label("0:00", 11, Theme.muted());
+        fullTotal = label("0:00", 11, Theme.muted());
         fullElapsed.setLayoutParams(new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         fullTotal.setLayoutParams(new LinearLayout.LayoutParams(0,
@@ -514,19 +564,27 @@ public class MainActivity extends Activity {
         transport.addView(repeatButton);
         sheet.addView(transport);
 
-        LinearLayout extras = row(LinearLayout.HORIZONTAL);
-        extras.setGravity(Gravity.CENTER_HORIZONTAL);
-        extras.setPadding(dp(14), dp(8), dp(14), dp(4));
+        LinearLayout switches = row(LinearLayout.HORIZONTAL);
+        switches.setGravity(Gravity.CENTER_HORIZONTAL);
+        switches.setPadding(dp(14), dp(8), dp(14), dp(2));
         crossfadeButton = chip("Crossfade", false, v -> {
             if (service != null) { service.setCrossfade(!service.crossfade()); refresh(); }
         });
-        extras.addView(crossfadeButton);
-        extras.addView(chip("EQ", false, v -> showEqualizer()));
-        extras.addView(chip("Speed", false, v -> askSpeed()));
-        extras.addView(chip("Sleep", false, v -> askSleepTimer()));
-        sheet.addView(extras);
+        switches.addView(crossfadeButton);
+        visualizerButton = chip(visualizerOn ? "Visualizer ✓" : "Visualizer", visualizerOn,
+                v -> toggleVisualizer());
+        switches.addView(visualizerButton);
+        sheet.addView(switches);
 
-        fullLyrics = label("Lyrics appear here when a matching .lrc file is found.", 12, 0xAEBBDD);
+        LinearLayout tools = row(LinearLayout.HORIZONTAL);
+        tools.setGravity(Gravity.CENTER_HORIZONTAL);
+        tools.setPadding(dp(14), dp(2), dp(14), dp(4));
+        tools.addView(chip("EQ", false, v -> showEqualizer()));
+        tools.addView(chip("Speed", false, v -> askSpeed()));
+        tools.addView(chip("Sleep", false, v -> askSleepTimer()));
+        sheet.addView(tools);
+
+        fullLyrics = label("Lyrics appear here when a matching .lrc file is found.", 12, Theme.lyrics());
         fullLyrics.setMaxLines(3);
         fullLyrics.setPadding(dp(22), dp(8), dp(22), dp(22));
         sheet.addView(fullLyrics);
@@ -558,10 +616,14 @@ public class MainActivity extends Activity {
 
     private void closePlayer() {
         playerOverlay.animate().alpha(0f).translationY(dp(180)).setDuration(280)
-                .withEndAction(() -> playerOverlay.setVisibility(View.GONE)).start();
+                .withEndAction(() -> {
+                    playerOverlay.setVisibility(View.GONE);
+                    if (visualizer != null) visualizer.setPlaying(false);
+                }).start();
     }
 
     private void animateAccent(int accent) {
+        if (accentAnimator != null) accentAnimator.cancel();
         int from = currentAccent;
         currentAccent = accent;
         accentAnimator = ValueAnimator.ofObject(new ArgbEvaluator(), from, accent);
@@ -576,18 +638,27 @@ public class MainActivity extends Activity {
         gridToggle.setBackground(Glass.circle(false, c));
         miniPlay.setBackground(Glass.circle(true, c));
         playButton.setBackground(Glass.circle(true, c));
-        shuffleButton.setBackground(Glass.circle(false, c));
-        repeatButton.setBackground(Glass.circle(false, c));
-        crossfadeButton.setBackground(Glass.chip(
-                service != null && service.crossfade(), c));
+
+        boolean shuffleOn = service != null && service.shuffle();
+        shuffleButton.setBackground(Glass.circle(shuffleOn, c));
+        shuffleButton.setTextColor(shuffleOn ? Theme.onAccent() : Theme.textPrimary());
+        boolean repeatOn = service != null && service.repeat() != 0;
+        repeatButton.setBackground(Glass.circle(repeatOn, c));
+        repeatButton.setTextColor(repeatOn ? Theme.onAccent() : Theme.textPrimary());
+
+        boolean crossOn = service != null && service.crossfade();
+        crossfadeButton.setBackground(Glass.chip(crossOn, c));
+        crossfadeButton.setTextColor(Theme.chipText(crossOn));
+        visualizerButton.setBackground(Glass.chip(visualizerOn, c));
+        visualizerButton.setTextColor(Theme.chipText(visualizerOn));
+        if (visualizer != null) visualizer.setAccent(c);
+
         sortButton.setBackground(Glass.chip(false, c));
         playlistPicker.setBackground(Glass.chip(false, c));
         genrePicker.setBackground(Glass.chip(false, c));
         styleSeek(fullSeek);
         updateTabs();
     }
-
-    private int ambientAccent() { return currentAccent; }
 
     // ------------------------------------------------------------ Library
 
@@ -778,17 +849,17 @@ public class MainActivity extends Activity {
                 texts.setLayoutParams(new LinearLayout.LayoutParams(0,
                         ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
                 texts.setPadding(dp(12), dp(2), dp(4), dp(2));
-                TextView title = label("", 15, 0xFFFFFFFF);
+                TextView title = label("", 15, Theme.textPrimary());
                 title.setId(3);
                 title.setMaxLines(1);
-                title.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-                TextView sub = label("", 12, 0x9EACCD);
+                title.setTypeface(Theme.display());
+                TextView sub = label("", 12, Theme.sub());
                 sub.setId(4);
                 sub.setMaxLines(1);
                 texts.addView(title);
                 texts.addView(sub);
                 v.addView(texts);
-                TextView chevron = label("›", 18, 0x7182A8);
+                TextView chevron = label("›", 18, Theme.muted());
                 chevron.setGravity(Gravity.CENTER);
                 v.addView(chevron);
             }
@@ -798,7 +869,7 @@ public class MainActivity extends Activity {
             title.setText(s == null ? "" : s.title);
             boolean active = service != null && service.current() != null && s != null
                     && service.current().id == s.id;
-            title.setTextColor(active ? currentAccent : 0xFFFFFFFF);
+            title.setTextColor(active ? currentAccent : Theme.textPrimary());
             ((TextView) v.findViewById(4)).setText(s == null ? ""
                     : (s.artist == null || s.artist.trim().isEmpty() ? "<unknown>" : s.artist)
                     + "  ·  " + Library.duration(s.durationMs));
@@ -830,12 +901,12 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.MATCH_PARENT, dp(150)));
                 art.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 v.addView(art);
-                TextView title = label("", 13, 0xFFFFFFFF);
+                TextView title = label("", 13, Theme.textPrimary());
                 title.setId(2);
                 title.setGravity(Gravity.CENTER);
                 title.setMaxLines(1);
                 title.setPadding(dp(4), dp(8), dp(4), 0);
-                title.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+                title.setTypeface(Theme.display());
                 v.addView(title);
             }
             Song s = getItem(pos);
@@ -923,6 +994,8 @@ public class MainActivity extends Activity {
         m.add("Equalizer");
         m.add("Volume");
         m.add("Crossfade: " + (service != null && service.crossfade() ? "on" : "off"));
+        m.add("Visualizer: " + (visualizerOn ? "on" : "off"));
+        m.add("Theme: " + Theme.name());
         m.add("Fade length");
         m.add("ReplayGain: " + (service != null && service.replayGain() ? "on" : "off"));
         m.add("Excluded folders");
@@ -934,6 +1007,10 @@ public class MainActivity extends Activity {
             String t = item.getTitle().toString();
             if (t.startsWith("Crossfade")) {
                 if (service != null) { service.setCrossfade(!service.crossfade()); toast(t); }
+            } else if (t.startsWith("Visualizer")) {
+                toggleVisualizer();
+            } else if (t.startsWith("Theme")) {
+                switchTheme();
             } else if (t.startsWith("ReplayGain")) {
                 if (service != null) { service.setReplayGain(!service.replayGain()); toast(t); }
             } else switch (t) {
@@ -961,7 +1038,7 @@ public class MainActivity extends Activity {
     private void askNewPlaylist(final Song first) {
         final EditText input = new EditText(this);
         input.setHint("Playlist name");
-        input.setTextColor(0xFFFFFFFF);
+        input.setTextColor(Theme.textPrimary());
         new AlertDialog.Builder(this).setTitle("New playlist").setView(input)
                 .setPositiveButton("Create", (d, w) -> {
                     String name = input.getText().toString().trim();
@@ -980,7 +1057,7 @@ public class MainActivity extends Activity {
         if (service == null || service.queue().isEmpty()) { toast("Queue is empty"); return; }
         final EditText input = new EditText(this);
         input.setHint("Playlist name");
-        input.setTextColor(0xFFFFFFFF);
+        input.setTextColor(Theme.textPrimary());
         new AlertDialog.Builder(this).setTitle("Save queue").setView(input)
                 .setPositiveButton("Save", (d, w) -> {
                     String name = input.getText().toString().trim();
@@ -1100,7 +1177,7 @@ public class MainActivity extends Activity {
         LinearLayout box = row(LinearLayout.VERTICAL);
         CheckBox enable = new CheckBox(this);
         enable.setText("Enable equalizer");
-        enable.setTextColor(0xFFFFFFFF);
+        enable.setTextColor(Theme.textPrimary());
         enable.setChecked(eq.getEnabled());
         enable.setOnCheckedChangeListener((b, on) -> service.setEqualizerEnabled(on));
         box.addView(enable);
@@ -1124,7 +1201,7 @@ public class MainActivity extends Activity {
         final short min = eq.getBandLevelRange()[0], max = eq.getBandLevelRange()[1];
         for (short i = 0; i < bands; i++) {
             TextView t = label(eq.getBandFreqRange(i)[0] / 1000 + "–"
-                    + eq.getBandFreqRange(i)[1] / 1000 + " Hz", 12, 0xFFE0E8FF);
+                    + eq.getBandFreqRange(i)[1] / 1000 + " Hz", 12, Theme.sub());
             box.addView(t);
             SeekBar sb = new SeekBar(this);
             sb.setMax(max - min);
@@ -1212,7 +1289,8 @@ public class MainActivity extends Activity {
     private void about() {
         new AlertDialog.Builder(this).setTitle("The music player")
                 .setMessage("An original, offline music player.\n\n"
-                        + "High-end translucent UI, animated ambient backgrounds, "
+                        + "High-end translucent UI with Obsidian and Ivory themes, "
+                        + "optional spectrum visualizer, animated ambient backgrounds, "
                         + "album art, crossfade, ReplayGain, equalizer, playlists, "
                         + "queue, lyrics, sleep timer, widgets and media controls.\n\n"
                         + "No internet permission. No ads. No tracking.")
@@ -1300,14 +1378,18 @@ public class MainActivity extends Activity {
 
         boolean shuffleOn = service.shuffle();
         shuffleButton.setBackground(Glass.circle(shuffleOn, currentAccent));
-        shuffleButton.setTextColor(shuffleOn ? 0xFF0B0D16 : 0xFFFFFFFF);
+        shuffleButton.setTextColor(shuffleOn ? Theme.onAccent() : Theme.textPrimary());
         boolean repeatOn = service.repeat() != 0;
         repeatButton.setBackground(Glass.circle(repeatOn, currentAccent));
-        repeatButton.setTextColor(repeatOn ? 0xFF0B0D16 : 0xFFFFFFFF);
+        repeatButton.setTextColor(repeatOn ? Theme.onAccent() : Theme.textPrimary());
         boolean crossOn = service.crossfade();
         crossfadeButton.setText(crossOn ? "Crossfade ●" : "Crossfade");
         crossfadeButton.setBackground(Glass.chip(crossOn, currentAccent));
-        crossfadeButton.setTextColor(crossOn ? 0xFF0B0D16 : 0xFFE4EAFF);
+        crossfadeButton.setTextColor(Theme.chipText(crossOn));
+
+        applyVisualizerState();
+        if (visualizer != null) visualizer.setPlaying(visualizerOn && playing
+                && playerOverlay.getVisibility() == View.VISIBLE);
 
         String key = s == null || s.path == null ? "" : s.path;
         if (!key.equals(artPathKey)) {
@@ -1333,7 +1415,8 @@ public class MainActivity extends Activity {
         fullTotal.setText(Library.duration(dur));
         miniProgress.setScaleX(dur > 0 ? pos / (float) dur : 0f);
 
-        if (service.accentColor() != currentAccent) animateAccent(service.accentColor());
+        int desiredAccent = Theme.accent(service.accentColor());
+        if (desiredAccent != currentAccent) animateAccent(desiredAccent);
         if ("Queue".equals(tab) && service.queue().size() != viewSongs.size()) rebuild();
     }
 }

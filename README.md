@@ -15,13 +15,16 @@ Package: `com.themusicplayer.app` · minSdk 21 · targetSdk 34
 
 ## Included in v2
 
-### High-end interface (v3 refresh)
+### High-end interface (v4 refresh)
+- Two complete UI moods, switchable from the ⋯ menu: **Obsidian** (midnight glass) and **Ivory** (warm editorial cream, champagne accents, serif display type and a fine gilt rule)
 - Rebuilt around custom views instead of stock Android buttons: icon-only circular transport controls, navigation chips and a floating glass mini player
 - Immersive artwork backdrop: the current cover is blurred behind the library and the full player (Android 12+)
 - Animated ambient gradient that drifts and recolours from the cover art
 - Bottom-sheet player with rounded top corners, drag handle and slide-up motion
-- Large rounded cover art, accent-tinted sliders and active-row highlighting; **no visualizer bars**
+- Large rounded cover art, accent-tinted sliders and active-row highlighting
+- **Optional spectrum visualizer**: off by default, toggle from the now-playing screen or the ⋯ menu; remembers your choice
 - Staggered list entrance animations, springy chip/button feedback and smooth accent crossfades
+- Original echo-into-play launcher icon (adaptive on Android 8+, hand-drawn vectors/PNG for older devices)
 - Cover art from embedded tags with generated colour-themed placeholders
 
 ### Playback engine
@@ -62,8 +65,11 @@ with `d8`, aligns with `zipalign`, and signs with `apksigner`. Output is `TheMus
 AndroidManifest.xml
 res/layout/widget.xml
 res/drawable/widget_bg.xml
+res/drawable/ic_launcher_foreground.xml
+res/mipmap/ic_launcher.png, ic_launcher_round.png
+res/mipmap-anydpi-v26/ic_launcher.xml, ic_launcher_round.xml
 res/xml/widget_info.xml
-res/values/styles.xml
+res/values/styles.xml, colors.xml
 src/com/themusicplayer/app/
     MainActivity.java        UI, browsing, menus, dialogs, animations
     MusicService.java        playback, crossfade, ReplayGain, MediaSession, notification, equalizer
@@ -71,11 +77,14 @@ src/com/themusicplayer/app/
     Art.java                 embedded cover art, cache, colour extraction, rounded covers
     AmbientBackground.java   animated translucent gradient backdrop
     Glass.java               frosted-glass drawables
+    Theme.java               Obsidian / Ivory palettes and typography
+    VisualizerView.java      optional animated spectrum bars
     MusicWidget.java         home-screen widget
     ReplayGain.java          lightweight ReplayGain tag reader
     Song.java                song model
     Playlists.java           persistent playlists in SharedPreferences
     Lyrics.java              .lrc parser
+brand/make_icon.ps1          regenerates the launcher icon PNGs
 build.ps1                    repeatable build
 ```
 
