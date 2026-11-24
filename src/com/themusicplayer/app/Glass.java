@@ -1,0 +1,34 @@
+package com.themusicplayer.app;
+
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+
+/** Factory for frosted-glass style drawables. */
+public final class Glass {
+    private Glass() {}
+
+    public static GradientDrawable card(float radius) {
+        GradientDrawable d = new GradientDrawable();
+        d.setShape(GradientDrawable.RECTANGLE);
+        d.setCornerRadius(radius);
+        d.setColor(Color.argb(34, 255, 255, 255));
+        d.setStroke(1, Color.argb(46, 255, 255, 255));
+        return d;
+    }
+
+    public static GradientDrawable card(int accent, float radius) {
+        GradientDrawable d = card(radius);
+        d.setColor(Color.argb(24, Color.red(accent), Color.green(accent), Color.blue(accent)));
+        d.setStroke(1, Color.argb(60, Color.red(accent), Color.green(accent), Color.blue(accent)));
+        return d;
+    }
+
+    public static GradientDrawable pill(int accent) {
+        GradientDrawable d = new GradientDrawable();
+        d.setShape(GradientDrawable.RECTANGLE);
+        d.setCornerRadius(999f);
+        d.setColor(Color.argb(44, Color.red(accent), Color.green(accent), Color.blue(accent)));
+        d.setStroke(1, Color.argb(90, Color.red(accent), Color.green(accent), Color.blue(accent)));
+        return d;
+    }
+}
