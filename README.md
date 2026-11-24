@@ -17,7 +17,8 @@ Package: `com.themusicplayer.app` · minSdk 21 · targetSdk 34
 
 Tagged builds with attached APKs are on the [GitHub Releases page](../../releases):
 
-- **v5.0** (latest) — Aurora theme, persistent rotation, reliable active-row highlight
+- **v5.1** (latest) — corrected grouped sorting/filtering across Albums, Artists, Genres and Folders
+- **v5.0** — Aurora theme, persistent rotation, reliable active-row highlight
 - **v4.0** — optional visualizer, Ivory theme, original echo-play icon
 - **v3.2** — visualizer bars removed, other motion restored
 - **v3.1** — short-lived fully static now-playing experiment
@@ -53,7 +54,10 @@ were rebuilt from their tagged commits and are debug-signed with the same key. T
 
 ### Library & organization
 - Songs, Albums (grid or list), Artists (grid or list), Genres, Folders, Playlists, Queue and Lyrics views
-- Search across title, artist, album and filename; sorting by title / artist / album / duration / folder
+- Albums and Artists show group names and counts, sorted by the field shown in the Sort chip
+- Genre and folder pickers filter their tabs; a genre no longer duplicates its song list
+- Playlists can keep their saved order; search covers title, artist, album, folder and filename
+- Sorting uses natural per-tab modes (Album for Albums, Artist for Artists, saved Order for Playlists)
 - Playlists: create, rename, delete, add songs, save current queue, export/import via SAF file picker
 - Hide folders from the library
 - Synchronized `.lrc` / `.txt` lyrics with a full lyric pane

@@ -29,6 +29,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.provider.MediaStore;
 import android.text.Editable;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.Menu;
@@ -71,6 +72,7 @@ public class MainActivity extends Activity {
     private static final int REQ_PERMISSIONS = 7;
     private static final int REQ_EXPORT = 11;
     private static final int REQ_IMPORT = 12;
+    private static final String[] SORT_NAMES = {"Title", "Artist", "Album", "Duration", "Folder"};
 
     private MusicService service;
     private final List<Song> allSongs = new ArrayList<>();
@@ -87,7 +89,7 @@ public class MainActivity extends Activity {
     private TextView lyricsPane, miniTitle, miniSub;
     private ScrollView lyricsScroll;
     private EditText searchBox;
-    private TextView playlistPicker, genrePicker, gridToggle, playButton, miniPlay;
+    private TextView playlistPicker, genrePicker, folderPicker, gridToggle, playButton, miniPlay;
     private TextView sortButton, shuffleButton, repeatButton, crossfadeButton, visualizerButton;
     private TextView fullTitle, fullArtist, fullElapsed, fullTotal, fullLyrics;
     private SeekBar fullSeek;
@@ -177,6 +179,8 @@ public class MainActivity extends Activity {
         tv.setTag(selected);
         tv.setBackground(Glass.chip(selected, currentAccent));
         tv.setGravity(Gravity.CENTER);
+        tv.setSingleLine(true);
+        tv.setEllipsize(TextUtils.TruncateAt.END);
         tv.setPadding(dp(16), dp(9), dp(16), dp(9));
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -224,6 +228,42 @@ public class MainActivity extends Activity {
     private void updateTabs() {
         for (TextView chip : tabChips)
             setChipSelected(chip, chip.getText().toString().equals(tab));
+    }
+
+    private String[] sortNames() {
+        if ("Albums".equals(tab))
+            return new String[]{"Album", "Artist", "Duration", "Folder"};
+        if ("Artists".equals(tab))
+            return new String[]{"Artist", "Album", "Duration", "Folder"};
+        if ("Playlists".equals(tab))
+            return new String[]{"Order", "Title", "Artist", "Album", "Duration", "Folder"};
+        return SORT_NAMES;
+    }
+
+    private Library.Sort[] sortModes() {
+        if ("Albums".equals(tab))
+            return new Library.Sort[]{Library.Sort.ALBUM, Library.Sort.ARTIST,
+                    Library.Sort.DURATION, Library.Sort.FOLDER};
+        if ("Artists".equals(tab))
+            return new Library.Sort[]{Library.Sort.ARTIST, Library.Sort.ALBUM,
+                    Library.Sort.DURATION, Library.Sort.FOLDER};
+        if ("Playlists".equals(tab))
+            return new Library.Sort[]{null, Library.Sort.TITLE, Library.Sort.ARTIST,
+                    Library.Sort.ALBUM, Library.Sort.DURATION, Library.Sort.FOLDER};
+        return new Library.Sort[]{Library.Sort.TITLE, Library.Sort.ARTIST,
+                Library.Sort.ALBUM, Library.Sort.DURATION, Library.Sort.FOLDER};
+    }
+
+    private int sortPosition() {
+        int max = sortNames().length - 1;
+        if (sortIndex < 0) sortIndex = 0;
+        if (sortIndex > max) sortIndex = max;
+        return sortIndex;
+    }
+
+    private void updateSortLabel() {
+        if (sortButton == null) return;
+        sortButton.setText("Sort: " + sortNames()[sortPosition()]);
     }
 
     private void applyVisualizerState() {
@@ -321,7 +361,7 @@ public class MainActivity extends Activity {
         searchBar.setGravity(Gravity.CENTER_VERTICAL);
         searchBar.addView(label("⌕", 18, Theme.icon()));
         searchBox = new EditText(this);
-        searchBox.setHint("Search songs, artists, albums");
+        searchBox.setHint("Search songs, artists, albums, folders");
         searchBox.setTextColor(Theme.textPrimary());
         searchBox.setHintTextColor(Theme.hint());
         searchBox.setBackground(null);
@@ -338,20 +378,30 @@ public class MainActivity extends Activity {
         content.addView(searchBar);
 
         // Filter chips
-        final String[] sortNames = {"Title", "Artist", "Album", "Duration", "Folder"};
         LinearLayout filterRow = row(LinearLayout.HORIZONTAL);
-        sortButton = chip("Sort: " + sortNames[sortIndex], false, v -> {
-            sortIndex = (sortIndex + 1) % sortNames.length;
-            sortButton.setText("Sort: " + sortNames[sortIndex]);
+        sortButton = chip("Sort: " + sortNames()[sortPosition()], false, v -> {
+            sortIndex = (sortIndex + 1) % sortNames().length;
+            updateSortLabel();
             rebuild();
         });
         filterRow.addView(sortButton);
-        playlistPicker = chip("Playlist: —", false, v -> cycleName(playlists.names(), true));
+        playlistPicker = chip("Playlist: —", false,
+                v -> cycleName(playlists.names(), playlistPicker, "Playlist: "));
         playlistPicker.setVisibility(View.GONE);
         filterRow.addView(playlistPicker);
-        genrePicker = chip("Genre: —", false, v -> cycleName(Library.genres(this), false));
+        genrePicker = chip("Genre: —", false,
+                v -> cycleName(Library.genres(this), genrePicker, "Genre: "));
         genrePicker.setVisibility(View.GONE);
         filterRow.addView(genrePicker);
+        folderPicker = chip("Folder: —", false,
+                v -> cycleName(Library.folders(allSongs), folderPicker, "Folder: "));
+        LinearLayout.LayoutParams folderParams =
+                (LinearLayout.LayoutParams) folderPicker.getLayoutParams();
+        folderParams.width = 0;
+        folderParams.weight = 1f;
+        folderPicker.setLayoutParams(folderParams);
+        folderPicker.setVisibility(View.GONE);
+        filterRow.addView(folderPicker);
         content.addView(filterRow);
 
         // Navigation chips
@@ -361,6 +411,8 @@ public class MainActivity extends Activity {
             TextView c = chip(t, t.equals(tab), v -> {
                 tab = t;
                 searchBox.setText("");
+                sortIndex = 0;
+                updateSortLabel();
                 updateTabs();
                 rebuild();
             });
@@ -722,6 +774,7 @@ public class MainActivity extends Activity {
 
     private String currentPlaylist() { return pickedName(playlists.names(), playlistPicker, "Playlist: "); }
     private String currentGenre() { return pickedName(Library.genres(this), genrePicker, "Genre: "); }
+    private String currentFolder() { return pickedName(Library.folders(allSongs), folderPicker, "Folder: "); }
 
     private String pickedName(List<String> names, TextView picker, String prefix) {
         if (names.isEmpty()) return null;
@@ -730,10 +783,13 @@ public class MainActivity extends Activity {
         return names.contains(selected) ? selected : names.get(0);
     }
 
-    private void cycleName(List<String> names, boolean playlist) {
-        if (names.isEmpty()) { toast(playlist ? "No playlists yet" : "No genres found"); return; }
-        TextView picker = playlist ? playlistPicker : genrePicker;
-        String prefix = playlist ? "Playlist: " : "Genre: ";
+    private void cycleName(List<String> names, TextView picker, String prefix) {
+        if (names.isEmpty()) {
+            if ("Playlist: ".equals(prefix)) toast("No playlists yet");
+            else if ("Genre: ".equals(prefix)) toast("No genres found");
+            else toast("No folders found");
+            return;
+        }
         String current = pickedName(names, picker, prefix);
         String next = names.get((names.indexOf(current) + 1) % names.size());
         picker.setText(prefix + next);
@@ -743,10 +799,15 @@ public class MainActivity extends Activity {
 
     private void rebuild() {
         viewSongs.clear();
+        updateSortLabel();
         String q = searchBox == null ? "" : searchBox.getText().toString();
 
-        playlistPicker.setVisibility("Playlists".equals(tab) ? View.VISIBLE : View.GONE);
-        genrePicker.setVisibility("Genres".equals(tab) ? View.VISIBLE : View.GONE);
+        if (playlistPicker != null)
+            playlistPicker.setVisibility("Playlists".equals(tab) ? View.VISIBLE : View.GONE);
+        if (genrePicker != null)
+            genrePicker.setVisibility("Genres".equals(tab) ? View.VISIBLE : View.GONE);
+        if (folderPicker != null)
+            folderPicker.setVisibility("Folders".equals(tab) ? View.VISIBLE : View.GONE);
         if ("Playlists".equals(tab)) {
             String name = currentPlaylist();
             if (name != null) playlistPicker.setText("Playlist: " + name);
@@ -754,6 +815,10 @@ public class MainActivity extends Activity {
         if ("Genres".equals(tab)) {
             String name = currentGenre();
             if (name != null) genrePicker.setText("Genre: " + name);
+        }
+        if ("Folders".equals(tab)) {
+            String name = currentFolder();
+            if (name != null) folderPicker.setText("Folder: " + name);
         }
 
         if ("Queue".equals(tab)) {
@@ -766,10 +831,13 @@ public class MainActivity extends Activity {
             }
         } else if ("Genres".equals(tab)) {
             String genre = currentGenre();
-            if (genre != null) viewSongs.addAll(Library.inGenre(this, allSongs, genre));
-            viewSongs.addAll(Library.filter(viewSongs, q));
+            List<Song> inGenre = genre == null ? new ArrayList<>()
+                    : Library.inGenre(this, allSongs, genre);
+            viewSongs.addAll(Library.filter(inGenre, q));
         } else if ("Folders".equals(tab)) {
-            viewSongs.addAll(Library.filter(allSongs, q));
+            String folder = currentFolder();
+            for (Song s : Library.filter(allSongs, q))
+                if (folder == null || folder.equals(s.folder)) viewSongs.add(s);
         } else {
             List<Song> base = Library.filter(allSongs, q);
             if ("Albums".equals(tab)) base = Library.groupByAlbum(base);
@@ -778,9 +846,8 @@ public class MainActivity extends Activity {
         }
 
         if (!"Queue".equals(tab) && !"Lyrics".equals(tab)) {
-            Library.Sort[] modes = {Library.Sort.TITLE, Library.Sort.ARTIST, Library.Sort.ALBUM,
-                    Library.Sort.DURATION, Library.Sort.FOLDER};
-            Library.sort(viewSongs, modes[sortIndex % modes.length], true);
+            Library.Sort sort = sortModes()[sortPosition()];
+            if (sort != null) Library.sort(viewSongs, sort, true);
         }
 
         boolean gridOn = gridMode && ("Albums".equals(tab) || "Artists".equals(tab));
@@ -793,10 +860,6 @@ public class MainActivity extends Activity {
         if (lyricsOn) refreshLyrics();
         refresh();
         animateItems = false;
-    }
-
-    private int sortMode() {
-        return sortIndex;
     }
 
     private void onItemClick(int pos) {
@@ -848,6 +911,50 @@ public class MainActivity extends Activity {
 
     // --------------------------------------------------------- Adapters
 
+    private String nonEmpty(String value, String fallback) {
+        return value == null || value.trim().isEmpty() ? fallback : value.trim();
+    }
+
+    private String count(int n, String noun) {
+        return n + " " + noun + (n == 1 ? "" : "s");
+    }
+
+    private String folderLeaf(String folder) {
+        String f = folder == null ? "" : folder;
+        int slash = Math.max(f.lastIndexOf('/'), f.lastIndexOf('\\'));
+        return slash >= 0 && slash + 1 < f.length() ? f.substring(slash + 1) : f;
+    }
+
+    private String rowTitle(Song s) {
+        if (s == null) return "";
+        if ("Albums".equals(tab)) return nonEmpty(s.album, "<unknown album>");
+        if ("Artists".equals(tab)) return nonEmpty(s.artist, "<unknown artist>");
+        if ("Folders".equals(tab)) return nonEmpty(folderLeaf(s.folder), "<root>");
+        return nonEmpty(s.title, s.fileName);
+    }
+
+    private String rowSubtitle(Song s) {
+        if (s == null) return "";
+        String artist = nonEmpty(s.artist, "<unknown>");
+        if ("Albums".equals(tab))
+            return artist + "  ·  " + count(Library.albumTracks(allSongs, s), "track");
+        if ("Artists".equals(tab))
+            return count(Library.artistAlbums(allSongs, s), "album") + "  ·  "
+                    + count(Library.artistTracks(allSongs, s), "track");
+        if ("Folders".equals(tab)) return artist + "  ·  " + Library.duration(s.durationMs);
+        return artist + "  ·  " + Library.duration(s.durationMs);
+    }
+
+    private boolean rowActive(Song s) {
+        Song current = service == null ? null : service.current();
+        if (s == null || current == null) return false;
+        if (s.id == current.id) return true;
+        if ("Albums".equals(tab)) return Library.sameAlbum(s, current);
+        if ("Artists".equals(tab)) return Library.sameArtist(s, current);
+        if ("Folders".equals(tab)) return s.folder != null && s.folder.equals(current.folder);
+        return false;
+    }
+
     private class SongListAdapter extends BaseAdapter {
         @Override public int getCount() { return viewSongs.size(); }
         @Override public Song getItem(int pos) { return viewSongs.get(pos); }
@@ -885,17 +992,14 @@ public class MainActivity extends Activity {
                 v.addView(chevron);
             }
             Song s = getItem(pos);
-            boolean active = service != null && service.current() != null && s != null
-                    && service.current().id == s.id;
+            boolean active = rowActive(s);
             v.setBackground(active ? Glass.activeCard(currentAccent, 16) : Glass.card(16));
             ((ImageView) v.findViewById(1)).setImageDrawable(drawableFor(s));
             TextView title = (TextView) v.findViewById(3);
-            title.setText(s == null ? "" : s.title);
+            title.setText(rowTitle(s));
             title.setTextColor(active ? Theme.activeText() : Theme.textPrimary());
             ((TextView) v.findViewById(5)).setTextColor(active ? Theme.activeText() : Theme.muted());
-            ((TextView) v.findViewById(4)).setText(s == null ? ""
-                    : (s.artist == null || s.artist.trim().isEmpty() ? "<unknown>" : s.artist)
-                    + "  ·  " + Library.duration(s.durationMs));
+            ((TextView) v.findViewById(4)).setText(rowSubtitle(s));
             if (animateItems && pos < 12) {
                 v.setAlpha(0f);
                 v.setTranslationX(dp(24));
@@ -933,10 +1037,12 @@ public class MainActivity extends Activity {
                 v.addView(title);
             }
             Song s = getItem(pos);
+            boolean active = rowActive(s);
+            v.setBackground(active ? Glass.activeCard(currentAccent, 20) : Glass.card(20));
             ((ImageView) v.findViewById(1)).setImageDrawable(drawableFor(s));
-            String name = s == null ? "" : "Albums".equals(tab) ? s.album : s.artist;
-            ((TextView) v.findViewById(2)).setText(name == null || name.trim().isEmpty()
-                    ? "<unknown>" : name);
+            TextView title = (TextView) v.findViewById(2);
+            title.setText(rowTitle(s));
+            title.setTextColor(active ? Theme.activeText() : Theme.textPrimary());
             return v;
         }
     }

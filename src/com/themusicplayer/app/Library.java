@@ -7,9 +7,11 @@ import android.provider.MediaStore;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -57,51 +59,90 @@ public final class Library {
     public enum Sort { TITLE, ARTIST, ALBUM, DURATION, FOLDER }
 
     public static void sort(List<Song> songs, Sort sort, boolean ascending) {
-        Comparator<Song> cmp;
-        switch (sort) {
-            case ARTIST: cmp = (a, b) -> compare(a.artist, b.artist); break;
-            case ALBUM: cmp = (a, b) -> compare(a.album, b.album); break;
-            case DURATION: cmp = (a, b) -> Long.compare(a.durationMs, b.durationMs); break;
-            case FOLDER: cmp = (a, b) -> compare(a.folder, b.folder); break;
-            default: cmp = (a, b) -> compare(a.title, b.title); break;
-        }
+        Comparator<Song> cmp = comparator(sort);
         Collections.sort(songs, ascending ? cmp : cmp.reversed());
     }
 
+    /** Stable sort with a secondary key, used by grouped tabs so rows read predictably. */
+    public static void sort(List<Song> songs, Sort primary, Sort secondary) {
+        Collections.sort(songs, comparator(primary).thenComparing(comparator(secondary)));
+    }
+
+    private static Comparator<Song> comparator(Sort sort) {
+        switch (sort) {
+            case ARTIST: return (a, b) -> compare(a.artist, b.artist);
+            case ALBUM: return (a, b) -> compare(a.album, b.album);
+            case DURATION: return (a, b) -> Long.compare(a.durationMs, b.durationMs);
+            case FOLDER: return (a, b) -> compare(a.folder, b.folder);
+            default: return (a, b) -> compare(a.title, b.title);
+        }
+    }
+
     private static int compare(String a, String b) {
-        return (a == null ? "" : a).compareToIgnoreCase(b == null ? "" : b);
+        return empty(a).trim().compareToIgnoreCase(empty(b).trim());
     }
 
-    /** One representative song per album. */
+    /** One representative song per album, with a deterministic representative. */
     public static List<Song> groupByAlbum(List<Song> all) {
-        Map<String, Song> seen = new HashMap<>();
-        for (Song s : all) seen.putIfAbsent(key(s.album, s.artist), s);
+        List<Song> ordered = new ArrayList<>(all);
+        sort(ordered, Sort.ALBUM, Sort.TITLE);
+        Map<String, Song> seen = new LinkedHashMap<>();
+        for (Song s : ordered) seen.putIfAbsent(key(s.album, s.artist), s);
         return new ArrayList<>(seen.values());
     }
 
-    /** One representative song per artist. */
+    /** One representative song per artist, with a deterministic representative. */
     public static List<Song> groupByArtist(List<Song> all) {
-        Map<String, Song> seen = new HashMap<>();
-        for (Song s : all) seen.putIfAbsent(empty(s.artist), s);
+        List<Song> ordered = new ArrayList<>(all);
+        sort(ordered, Sort.ARTIST, Sort.ALBUM);
+        Map<String, Song> seen = new LinkedHashMap<>();
+        for (Song s : ordered) seen.putIfAbsent(normalize(s.artist), s);
         return new ArrayList<>(seen.values());
     }
 
-    private static String key(String a, String b) { return empty(a) + "|" + empty(b); }
+    private static String key(String a, String b) { return normalize(a) + "|" + normalize(b); }
+
+    private static String normalize(String s) {
+        String v = empty(s).trim();
+        return v.isEmpty() ? "<unknown>" : v.toLowerCase(Locale.ROOT);
+    }
+
     private static String empty(String s) { return s == null ? "" : s; }
+
+    public static boolean sameAlbum(Song a, Song b) {
+        return a != null && b != null && key(a.album, a.artist).equals(key(b.album, b.artist));
+    }
+
+    public static boolean sameArtist(Song a, Song b) {
+        return a != null && b != null && normalize(a.artist).equals(normalize(b.artist));
+    }
 
     public static List<Song> ofAlbum(List<Song> all, Song picked) {
         List<Song> out = new ArrayList<>();
-        for (Song s : all)
-            if (key(s.album, s.artist).equals(key(picked.album, picked.artist))) out.add(s);
-        sort(out, Sort.TITLE, true);
+        for (Song s : all) if (sameAlbum(s, picked)) out.add(s);
+        sort(out, Sort.TITLE, Sort.DURATION);
         return out;
     }
 
     public static List<Song> ofArtist(List<Song> all, Song picked) {
         List<Song> out = new ArrayList<>();
-        for (Song s : all) if (empty(s.artist).equals(empty(picked.artist))) out.add(s);
-        sort(out, Sort.ALBUM, true);
+        for (Song s : all) if (sameArtist(s, picked)) out.add(s);
+        sort(out, Sort.ALBUM, Sort.TITLE);
         return out;
+    }
+
+    public static int albumTracks(List<Song> all, Song picked) {
+        return ofAlbum(all, picked).size();
+    }
+
+    public static int artistTracks(List<Song> all, Song picked) {
+        return ofArtist(all, picked).size();
+    }
+
+    public static int artistAlbums(List<Song> all, Song picked) {
+        Set<String> albums = new HashSet<>();
+        for (Song s : all) if (sameArtist(s, picked)) albums.add(key(s.album, s.artist));
+        return albums.size();
     }
 
     public static List<String> folders(List<Song> all) {
@@ -123,7 +164,8 @@ public final class Library {
         String q = query.trim().toLowerCase();
         List<Song> out = new ArrayList<>();
         for (Song s : all)
-            if (contains(s.title, q) || contains(s.artist, q) || contains(s.album, q) || contains(s.fileName, q))
+            if (contains(s.title, q) || contains(s.artist, q) || contains(s.album, q)
+                    || contains(s.fileName, q) || contains(s.folder, q))
                 out.add(s);
         return out;
     }
