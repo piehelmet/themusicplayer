@@ -19,8 +19,9 @@ Package: `com.themusicplayer.app` · minSdk 21 · targetSdk 34
 - Rebuilt around custom views instead of stock Android buttons: icon-only circular transport controls, navigation chips and a floating glass mini player
 - Immersive artwork backdrop: the current cover is blurred behind the library and the full player (Android 12+)
 - Animated ambient gradient that drifts and recolours from the cover art
-- Bottom-sheet player with rounded top corners, drag handle and slide-up motion
-- Large rounded cover art, spectrum visualizer, accent-tinted sliders and active-row highlighting
+- Bottom-sheet player with rounded top corners and drag handle; opens instantly with **no motion** while it is displayed
+- Large rounded cover art, static spectrum bars, accent-tinted sliders and active-row highlighting
+- Ambient drift, visualizer animation, pop feedback and accent tweening pause automatically while the full player is open
 - Staggered list entrance animations, springy chip/button feedback and smooth accent crossfades
 - Cover art from embedded tags with generated colour-themed placeholders
 

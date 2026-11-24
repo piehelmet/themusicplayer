@@ -29,6 +29,13 @@ public class VisualizerView extends View {
         anim.start();
     }
 
+    /** Pause or resume the bar animation (used when the full player is open). */
+    public void setMotion(boolean on) {
+        anim.cancel();
+        if (on) anim.start();
+        else { phase = 0f; playing = false; invalidate(); }
+    }
+
     public void setPlaying(boolean on) { playing = on; invalidate(); }
     public void setAccent(int color) { accent = color; invalidate(); }
 

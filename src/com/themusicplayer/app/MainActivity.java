@@ -96,6 +96,8 @@ public class MainActivity extends Activity {
     private View miniProgress;
     private final List<TextView> tabChips = new ArrayList<>();
     private String artPathKey = "";
+    private ValueAnimator accentAnimator;
+    private boolean motionEnabled = true;
     private int sortIndex = 0;
     private int currentAccent = 0xFF5B8CFF;
 
@@ -548,6 +550,7 @@ public class MainActivity extends Activity {
     }
 
     private void animatePop(View v) {
+        if (!motionEnabled) return;
         v.animate().scaleX(1.08f).scaleY(1.08f).setDuration(110)
                 .setInterpolator(new OvershootInterpolator(2f))
                 .withEndAction(() -> v.animate().scaleX(1f).scaleY(1f).setDuration(140).start())
@@ -556,41 +559,51 @@ public class MainActivity extends Activity {
 
     private void openPlayer() {
         if (playerOverlay.getVisibility() == View.VISIBLE) return;
+        motionEnabled = false;
+        if (accentAnimator != null) accentAnimator.cancel();
+        ambient.setMotion(false);
+        visualizer.setMotion(false);
+        playerOverlay.setTranslationY(0f);
+        playerOverlay.setAlpha(1f);
         playerOverlay.setVisibility(View.VISIBLE);
-        playerOverlay.setTranslationY(dp(180));
-        playerOverlay.animate().alpha(1f).translationY(0f).setDuration(420)
-                .setInterpolator(new DecelerateInterpolator()).start();
         refresh();
     }
 
     private void closePlayer() {
-        playerOverlay.animate().alpha(0f).translationY(dp(180)).setDuration(280)
-                .withEndAction(() -> playerOverlay.setVisibility(View.GONE)).start();
+        motionEnabled = true;
+        ambient.setMotion(true);
+        visualizer.setMotion(true);
+        playerOverlay.setAlpha(1f);
+        playerOverlay.setTranslationY(0f);
+        playerOverlay.setVisibility(View.GONE);
+        refresh();
     }
 
     private void animateAccent(int accent) {
+        int from = currentAccent;
         currentAccent = accent;
-        ValueAnimator anim = ValueAnimator.ofObject(new ArgbEvaluator(),
-                ambientAccent(), accent);
-        anim.setDuration(900);
-        anim.addUpdateListener(a -> {
-            int c = (int) a.getAnimatedValue();
-            ambient.setAccent(c);
-            miniProgress.setBackgroundColor(c);
-            gridToggle.setBackground(Glass.circle(false, c));
-            miniPlay.setBackground(Glass.circle(true, c));
-            playButton.setBackground(Glass.circle(true, c));
-            shuffleButton.setBackground(Glass.circle(false, c));
-            repeatButton.setBackground(Glass.circle(false, c));
-            crossfadeButton.setBackground(Glass.chip(
-                    service != null && service.crossfade(), c));
-            sortButton.setBackground(Glass.chip(false, c));
-            playlistPicker.setBackground(Glass.chip(false, c));
-            genrePicker.setBackground(Glass.chip(false, c));
-            styleSeek(fullSeek);
-            updateTabs();
-        });
-        anim.start();
+        if (!motionEnabled) { applyAccent(accent); return; }
+        accentAnimator = ValueAnimator.ofObject(new ArgbEvaluator(), from, accent);
+        accentAnimator.setDuration(900);
+        accentAnimator.addUpdateListener(a -> applyAccent((int) a.getAnimatedValue()));
+        accentAnimator.start();
+    }
+
+    private void applyAccent(int c) {
+        ambient.setAccent(c);
+        miniProgress.setBackgroundColor(c);
+        gridToggle.setBackground(Glass.circle(false, c));
+        miniPlay.setBackground(Glass.circle(true, c));
+        playButton.setBackground(Glass.circle(true, c));
+        shuffleButton.setBackground(Glass.circle(false, c));
+        repeatButton.setBackground(Glass.circle(false, c));
+        crossfadeButton.setBackground(Glass.chip(
+                service != null && service.crossfade(), c));
+        sortButton.setBackground(Glass.chip(false, c));
+        playlistPicker.setBackground(Glass.chip(false, c));
+        genrePicker.setBackground(Glass.chip(false, c));
+        styleSeek(fullSeek);
+        updateTabs();
     }
 
     private int ambientAccent() { return currentAccent; }
