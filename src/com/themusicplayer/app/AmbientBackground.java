@@ -47,6 +47,10 @@ public class AmbientBackground extends View {
             // Aurora keeps its own northern-light signature instead of inheriting cover hue.
             accent = Color.HSVToColor(0xFF, new float[]{168f, 0.72f, 0.38f});
             accent2 = Color.HSVToColor(0xFF, new float[]{196f, 0.62f, 0.32f});
+        } else if (Theme.mode() == Theme.GLASS) {
+            // iOS-like cool blue/indigo gel behind the frosted panels.
+            accent = Color.HSVToColor(0xFF, new float[]{211f, 0.86f, 0.52f});
+            accent2 = Color.HSVToColor(0xFF, new float[]{246f, 0.70f, 0.46f});
         } else {
             accent = Color.HSVToColor(0xFF,
                     new float[]{(hsv[0] + 355) % 360, 0.55f, 0.34f});

@@ -17,7 +17,8 @@ Package: `com.themusicplayer.app` · minSdk 21 · targetSdk 34
 
 Tagged builds with attached APKs are on the [GitHub Releases page](../../releases):
 
-- **v5.4** (latest) — peak-aware ReplayGain boost, equal-power crossfade, bass and loudness controls
+- **v5.5** (latest) — new iOS-inspired **Glass** theme, top-lit frosted panels and a redesigned Sound panel with preset chips and accent-tinted sliders
+- **v5.4** — peak-aware ReplayGain boost, equal-power crossfade, bass and loudness controls
 - **v5.3** — play history with play counts, portable build script and one-click ADB installer
 - **v5.2** — faster search and scrolling, plus the Porcelain light theme
 - **v5.1** — corrected grouped sorting/filtering across Albums, Artists, Genres and Folders
@@ -35,7 +36,7 @@ were rebuilt from their tagged commits and are debug-signed with the same key. T
 ## Included in v2
 
 ### High-end interface (v5 refresh)
-- Four complete UI moods, switchable from the ⋯ menu: **Obsidian** (midnight glass), **Ivory** (warm editorial cream, champagne accents, serif display type and a fine gilt rule), **Aurora** (deep teal night, mint light, wide-spaced sans display) and **Porcelain** (cool Apple-inspired white/gray glass, blue accent, fine separators and crisp sans type)
+- Five complete UI moods, switchable from the ⋯ menu: **Obsidian** (midnight glass), **Ivory** (warm editorial cream, champagne accents, serif display type and a fine gilt rule), **Aurora** (deep teal night, mint light, wide-spaced sans display), **Porcelain** (cool Apple-inspired white/gray glass, blue accent, fine separators and crisp sans type) and **Glass** (iOS-inspired dark frosted material with top-lit gradient panels, luminous hairlines, cool blue/indigo gel and iOS blue accents)
 - Rebuilt around custom views instead of stock Android buttons: icon-only circular transport controls, navigation chips and a floating glass mini player
 - Immersive artwork backdrop: the current cover is blurred behind the library and the full player (Android 12+)
 - Animated ambient gradient that drifts and recolours from the cover art
@@ -131,7 +132,7 @@ src/com/themusicplayer/app/
     Art.java                 embedded cover art, cache, colour extraction, rounded covers
     AmbientBackground.java   animated translucent gradient backdrop
     Glass.java               frosted-glass drawables
-    Theme.java               Obsidian / Ivory / Aurora / Porcelain palettes and typography
+    Theme.java               Obsidian / Ivory / Aurora / Porcelain / Glass palettes and typography
     VisualizerView.java      optional animated spectrum bars
     MusicWidget.java         home-screen widget
     ReplayGain.java          lightweight ReplayGain tag reader
