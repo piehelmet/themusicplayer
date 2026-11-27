@@ -22,6 +22,9 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -75,6 +78,9 @@ public class MusicService extends Service {
     private final Random random = new Random();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private int tickCount = 0;
+    private History history;
+    private int pendingSeekMs;
+    private long lastStateSaveMs;
 
     private final Runnable tick = new Runnable() {
         @Override public void run() {
@@ -85,7 +91,11 @@ public class MusicService extends Service {
                 pause();
             }
             broadcast();
-            if (++tickCount % 4 == 0) notifyWidget();
+            // State is broadcast every 500 ms instead of every tick; explicit user
+            // actions still broadcast immediately. Widget work only happens if one exists.
+            tickCount++;
+            if (tickCount % 2 == 0) broadcast();
+            if (tickCount % 4 == 0) notifyWidget();
             handler.postDelayed(this, 250);
         }
     };
@@ -97,6 +107,7 @@ public class MusicService extends Service {
     @Override public void onCreate() {
         super.onCreate();
         prefs = getSharedPreferences("tmp_settings", MODE_PRIVATE);
+        history = new History(this);
         crossfadeOn = prefs.getBoolean("crossfade", true);
         replayGainOn = prefs.getBoolean("replaygain", true);
         volume = prefs.getFloat("volume", 1f);
@@ -120,6 +131,7 @@ public class MusicService extends Service {
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "themusicplayer:playback");
         createChannel();
+        restoreState();
         handler.post(tick);
     }
 
@@ -211,6 +223,12 @@ public class MusicService extends Service {
     // ------------------------------------------------------- Playback
 
     private void playCurrent() {
+        pendingSeekMs = 0;
+        playCurrent(true);
+    }
+
+    /** Prepares the active track; autoPlay=false is used when restoring a saved session. */
+    private void playCurrent(boolean autoPlay) {
         cancelCrossfade();
         if (index < 0 || index >= queue.size()) return;
         Song song = queue.get(index);
@@ -227,14 +245,27 @@ public class MusicService extends Service {
                 applySpeed(mp);
                 initEqualizer();
                 restoreEq();
+                if (pendingSeekMs > 0) {
+                    try {
+                        int duration = mp.getDuration();
+                        mp.seekTo(duration > 0 ? Math.min(pendingSeekMs, duration) : pendingSeekMs);
+                    } catch (Exception ignored) {
+                    }
+                }
+                pendingSeekMs = 0;
                 applyVolume();
-                mp.start();
-                session.setActive(true);
-                if (!wakeLock.isHeld()) wakeLock.acquire(10 * 60 * 1000L);
+                if (autoPlay) {
+                    mp.start();
+                    session.setActive(true);
+                    if (!wakeLock.isHeld()) wakeLock.acquire(10 * 60 * 1000L);
+                    history.record(song);
+                    updateState(PlaybackState.STATE_PLAYING);
+                    startForeground(NOTIFICATION_ID, notification());
+                } else {
+                    updateState(PlaybackState.STATE_PAUSED);
+                }
                 accent = Art.accent(Art.get(this, song));
-                updateState(PlaybackState.STATE_PLAYING);
                 updateMetadata();
-                startForeground(NOTIFICATION_ID, notification());
                 notifyWidget();
                 broadcast();
             });
@@ -304,6 +335,8 @@ public class MusicService extends Service {
         player = next;
         incoming = null;
         index = incomingIndex;
+        Song now = current();
+        if (now != null) history.record(now);
         prepared = true;
         incomingPrepared = false;
         crossfading = false;
@@ -375,8 +408,11 @@ public class MusicService extends Service {
         if (index < 0) return;
         if (!isPlaying()) {
             if (prepared) {
-                try { applyVolume(); player.start(); }
-                catch (IllegalStateException e) { playCurrent(); return; }
+                try {
+                    applyVolume();
+                    player.start();
+                    history.touch(current());
+                } catch (IllegalStateException e) { playCurrent(); return; }
             } else { playCurrent(); return; }
         }
         session.setActive(true);
@@ -396,6 +432,7 @@ public class MusicService extends Service {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         nm.notify(NOTIFICATION_ID, notification());
         notifyWidget();
+        saveState();
         broadcast();
     }
 
@@ -538,6 +575,80 @@ public class MusicService extends Service {
     public long sleepRemaining() { return sleepUntil == 0 ? 0 : Math.max(0, sleepUntil - System.currentTimeMillis()); }
     public Lyrics lyrics() { lyrics = Lyrics.forSong(current()); return lyrics; }
 
+    // ---------------------------------------------------- Session persistence
+
+    /** Called by the Activity when it stops, in case the process is killed without onDestroy. */
+    public void saveStateNow() {
+        saveState();
+    }
+
+    private void saveState() {
+        if (prefs == null) return;
+        lastStateSaveMs = System.currentTimeMillis();
+        try {
+            JSONArray arr = new JSONArray();
+            for (Song s : queue) {
+                JSONObject o = new JSONObject();
+                o.put("id", s.id);
+                o.put("title", text(s.title));
+                o.put("artist", text(s.artist));
+                o.put("album", text(s.album));
+                o.put("path", text(s.path));
+                o.put("duration", s.durationMs);
+                arr.put(o);
+            }
+            prefs.edit()
+                    .putString("session_queue", arr.toString())
+                    .putInt("session_index", index)
+                    .putInt("session_position", position())
+                    .putBoolean("shuffle", shuffle)
+                    .putInt("repeat", repeat)
+                    .putFloat("speed", speed)
+                    .putLong("sleep_remaining", sleepRemaining())
+                    .apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void restoreState() {
+        shuffle = prefs.getBoolean("shuffle", false);
+        repeat = prefs.getInt("repeat", 0) % 3;
+        if (repeat < 0) repeat = 0;
+        speed = prefs.getFloat("speed", 1f);
+        long remaining = prefs.getLong("sleep_remaining", 0L);
+        if (remaining > 0) sleepUntil = System.currentTimeMillis() + remaining;
+
+        String raw = prefs.getString("session_queue", "");
+        if (raw == null || raw.isEmpty()) return;
+        try {
+            JSONArray arr = new JSONArray(raw);
+            List<Song> restored = new ArrayList<>();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.getJSONObject(i);
+                String path = o.optString("path", "");
+                if (path.isEmpty()) continue;
+                restored.add(new Song(
+                        o.optLong("id", -1L),
+                        o.optString("title", ""),
+                        o.optString("artist", "<unknown>"),
+                        o.optString("album", ""),
+                        path,
+                        o.optLong("duration", 0L)));
+            }
+            if (restored.isEmpty()) return;
+            queue.addAll(restored);
+            index = Math.max(0, Math.min(prefs.getInt("session_index", 0), queue.size() - 1));
+            pendingSeekMs = Math.max(0, prefs.getInt("session_position", 0));
+            // Prepare without starting: playback resumes only when the user presses play.
+            playCurrent(false);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static String text(String value) {
+        return value == null ? "" : value;
+    }
+
     private void broadcast() {
         Intent i = new Intent(UPDATE).setPackage(getPackageName());
         i.putExtra("playing", isPlaying());
@@ -549,9 +660,11 @@ public class MusicService extends Service {
         i.putExtra(EXTRA_ACCENT, accent);
         i.putExtra("crossfading", crossfading);
         sendBroadcast(i);
+        if (System.currentTimeMillis() - lastStateSaveMs > 2000) saveState();
     }
 
     private void notifyWidget() {
+        if (!MusicWidget.hasWidgets(this)) return;
         Song s = current();
         try {
             MusicWidget.refresh(this, s == null ? "The music player" : s.title,
@@ -621,6 +734,7 @@ public class MusicService extends Service {
     }
 
     @Override public void onDestroy() {
+        saveState();
         handler.removeCallbacks(tick);
         cancelCrossfade();
         try { player.stop(); player.release(); } catch (Exception ignored) {}

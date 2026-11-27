@@ -17,7 +17,8 @@ Package: `com.themusicplayer.app` · minSdk 21 · targetSdk 34
 
 Tagged builds with attached APKs are on the [GitHub Releases page](../../releases):
 
-- **v5.2** (latest) — faster search and scrolling, plus the Porcelain light theme
+- **v5.3** (latest) — play history with play counts, portable build script and one-click ADB installer
+- **v5.2** — faster search and scrolling, plus the Porcelain light theme
 - **v5.1** — corrected grouped sorting/filtering across Albums, Artists, Genres and Folders
 - **v5.0** — Aurora theme, persistent rotation, reliable active-row highlight
 - **v4.0** — optional visualizer, Ivory theme, original echo-play icon
@@ -55,7 +56,7 @@ were rebuilt from their tagged commits and are debug-signed with the same key. T
 - Background foreground-service playback, notification controls, MediaSession + hardware keys
 
 ### Library & organization
-- Songs, Albums (grid or list), Artists (grid or list), Genres, Folders, Playlists, Queue and Lyrics views
+- Songs, Albums (grid or list), Artists (grid or list), Genres, Folders, Playlists, Queue, Lyrics and Play History views
 - Albums and Artists show group names and counts, sorted by the field shown in the Sort chip
 - Genre and folder pickers filter their tabs; a genre no longer duplicates its song list
 - Playlists can keep their saved order; search covers title, artist, album, folder and filename
@@ -69,14 +70,41 @@ were rebuilt from their tagged commits and are debug-signed with the same key. T
 
 No `INTERNET` permission, no ads, no analytics.
 
+## Session restore and history
+
+The app now saves the active queue (as paths, so it survives MediaStore ID changes), current
+track, playback position, shuffle/repeat, speed, volume, crossfade, ReplayGain, fade length,
+sleep timer, theme, tab, sort mode, grid mode, filters and search text. On relaunch the queue
+and position are restored without auto-playing; press play to resume. State is written to
+`SharedPreferences` on every meaningful change, on `onStop`, and at least every two seconds
+while playing, so it survives a process kill as well as a clean exit.
+
+Play history is stored in its own `SharedPreferences` file, one entry per track with a play
+count and last-played time. It is available as the **History** tab, newest first. Tapping a
+row plays from that point in the history; long-press removes a single entry, and the ⋯ menu
+offers **Clear history**.
+
+## Efficiency notes
+
+- State broadcasts are sent every 500 ms instead of every 250 ms; user actions still update immediately.
+- Widget updates are skipped entirely when no widget is placed.
+- Genre listings are cached after each library scan instead of re-querying MediaStore during filtering.
+- Row artwork is decoded on a two-thread executor and delivered to recycled views only if the
+  view still represents the same path, avoiding main-thread `MediaMetadataRetriever` stalls while scrolling.
+
 ## Build
 
-Requires JDK 17 and Android SDK (build-tools 34.0.0 + platform android-35). Paths are
-configured at the top of `build.ps1`; adjust them for your machine.
+Requires a JDK (17+), Android SDK build-tools and an Android platform (android-35 preferred).
+`build.ps1` auto-detects `ANDROID_HOME`/`ANDROID_SDK_ROOT` (or `%LOCALAPPDATA%\Android\Sdk`),
+the newest installed build-tools, and `JAVA_HOME` (or `javac` on PATH). It signs with your
+own `~/.android/debug.keystore`, creating one if needed.
 
 ```
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
+
+To install on a connected phone/emulator (USB debugging enabled), double-click `install.cmd`
+or run `adb install -r TheMusicPlayer.apk`. No device is required to produce the APK.
 
 The script compiles resources with `aapt2`, Java sources with `javac`, converts to DEX
 with `d8`, aligns with `zipalign`, and signs with `apksigner`. Output is `TheMusicPlayer.apk`.
@@ -105,6 +133,7 @@ src/com/themusicplayer/app/
     ReplayGain.java          lightweight ReplayGain tag reader
     Song.java                song model
     Playlists.java           persistent playlists in SharedPreferences
+    History.java             persistent play history with counts and last-played times
     Lyrics.java              .lrc parser
 brand/make_icon.ps1          regenerates the launcher icon PNGs
 build.ps1                    repeatable build

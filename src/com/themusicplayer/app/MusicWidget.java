@@ -21,6 +21,13 @@ public class MusicWidget extends AppWidgetProvider {
         if (ids != null && ids.length > 0) update(context, manager, ids, title, sub, playing);
     }
 
+    /** Avoids doing RemoteViews work on devices with no widget placed. */
+    static boolean hasWidgets(Context context) {
+        AppWidgetManager manager = AppWidgetManager.getInstance(context);
+        int[] ids = manager.getAppWidgetIds(new ComponentName(context, MusicWidget.class));
+        return ids != null && ids.length > 0;
+    }
+
     private static void update(Context c, AppWidgetManager manager, int[] ids,
                                String title, String sub, boolean playing) {
         for (int id : ids) {

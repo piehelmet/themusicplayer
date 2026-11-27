@@ -90,6 +90,12 @@ public final class Art {
         }
     }
 
+    /** Returns an already-rounded cover without touching the artwork cache. */
+    public static Drawable peekRounded(String key, float radius) {
+        if (key == null || key.isEmpty()) return null;
+        return ROUNDED.get(key + "|" + radius);
+    }
+
     /** Reuses rounded covers across recycled list rows; same artwork/radius is identical. */
     public static Drawable roundedCached(Bitmap bitmap, float radius, String key) {
         String cacheKey = key + "|" + radius;

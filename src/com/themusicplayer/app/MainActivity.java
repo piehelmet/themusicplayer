@@ -33,6 +33,7 @@ import android.provider.MediaStore;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.text.format.DateUtils;
 import android.view.Gravity;
 import android.view.Menu;
 import android.view.SubMenu;
@@ -63,12 +64,15 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Translucent, animated music player UI. */
 public class MainActivity extends Activity {
@@ -77,6 +81,8 @@ public class MainActivity extends Activity {
     private static final int REQ_EXPORT = 11;
     private static final int REQ_IMPORT = 12;
     private static final String[] SORT_NAMES = {"Title", "Artist", "Album", "Duration", "Folder"};
+    private static final String[] TABS = {"Songs", "Albums", "Artists", "Genres", "Folders",
+            "Playlists", "Queue", "Lyrics", "History"};
 
     private MusicService service;
     private final List<Song> allSongs = new ArrayList<>();
@@ -107,6 +113,7 @@ public class MainActivity extends Activity {
     private int currentAccent = Theme.baseAccent();
 
     private Playlists playlists;
+    private History history;
     private SharedPreferences settings;
     private String tab = "Songs";
     private boolean gridMode = false;
@@ -126,6 +133,13 @@ public class MainActivity extends Activity {
     private final Set<Integer> animatedRows = new HashSet<>();
     private Drawable placeholderArt;
     private int placeholderTheme = -1;
+
+    private final ExecutorService artLoader = Executors.newFixedThreadPool(2);
+    private final Map<String, List<ImageView>> pendingArtViews = new HashMap<>();
+    private List<String> cachedGenres = new ArrayList<>();
+    private final List<History.Entry> historyEntries = new ArrayList<>();
+    private final Map<String, History.Entry> historyByPath = new HashMap<>();
+    private long historyVersion = -1;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
@@ -148,11 +162,13 @@ public class MainActivity extends Activity {
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         playlists = new Playlists(this);
+        history = new History(this);
         settings = getSharedPreferences("tmp_settings", MODE_PRIVATE);
         Theme.set(settings.getInt("theme", Theme.OBSIDIAN));
         currentAccent = Theme.baseAccent();
         visualizerOn = settings.getBoolean("visualizer_on", false);
         buildUi();
+        restoreUiState();
         requestPermissionsIfNeeded();
         // Keep playback alive even when this Activity is recreated or unbound.
         startService(new Intent(this, MusicService.class));
@@ -403,7 +419,7 @@ public class MainActivity extends Activity {
         playlistPicker.setVisibility(View.GONE);
         filterRow.addView(playlistPicker);
         genrePicker = chip("Genre: —", false,
-                v -> cycleName(Library.genres(this), genrePicker, "Genre: "));
+                v -> cycleName(cachedGenres, genrePicker, "Genre: "));
         genrePicker.setVisibility(View.GONE);
         filterRow.addView(genrePicker);
         folderPicker = chip("Folder: —", false,
@@ -418,9 +434,8 @@ public class MainActivity extends Activity {
         content.addView(filterRow);
 
         // Navigation chips
-        String[] tabs = {"Songs", "Albums", "Artists", "Genres", "Folders", "Playlists", "Queue", "Lyrics"};
         LinearLayout tabRow = row(LinearLayout.HORIZONTAL);
-        for (final String t : tabs) {
+        for (final String t : TABS) {
             TextView c = chip(t, t.equals(tab), v -> {
                 tab = t;
                 setQuery("");
@@ -524,6 +539,38 @@ public class MainActivity extends Activity {
         updateTabs();
         applyVisualizerState();
         rebuild();
+    }
+
+    private void restoreUiState() {
+        String savedTab = settings.getString("ui_tab", "Songs");
+        tab = Arrays.asList(TABS).contains(savedTab) ? savedTab : "Songs";
+        sortIndex = settings.getInt("ui_sort_index", 0);
+        gridMode = settings.getBoolean("ui_grid", false);
+        restorePicker(playlistPicker, "ui_playlist", "Playlist: —");
+        restorePicker(genrePicker, "ui_genre", "Genre: —");
+        restorePicker(folderPicker, "ui_folder", "Folder: —");
+        String query = settings.getString("ui_query", "");
+        if (query != null && !query.isEmpty()) setQuery(query);
+        updateTabs();
+        rebuild();
+    }
+
+    private void restorePicker(TextView picker, String key, String fallback) {
+        String value = settings.getString(key, "");
+        picker.setText(value == null || value.isEmpty() ? fallback : value);
+    }
+
+    private void saveUiState() {
+        if (settings == null) return;
+        settings.edit()
+                .putString("ui_tab", tab)
+                .putInt("ui_sort_index", sortIndex)
+                .putBoolean("ui_grid", gridMode)
+                .putString("ui_query", searchBox == null ? "" : searchBox.getText().toString())
+                .putString("ui_playlist", playlistPicker == null ? "" : playlistPicker.getText().toString())
+                .putString("ui_genre", genrePicker == null ? "" : genrePicker.getText().toString())
+                .putString("ui_folder", folderPicker == null ? "" : folderPicker.getText().toString())
+                .apply();
     }
 
     private void buildPlayerOverlay(FrameLayout root) {
@@ -811,6 +858,7 @@ public class MainActivity extends Activity {
     private void loadLibrary() {
         allSongs.clear();
         allSongs.addAll(Library.exclude(Library.load(this), excludedFolders()));
+        cachedGenres = Library.genres(this);
         buildGroupCounts();
         if (allSongs.isEmpty())
             toast("No music found. Add audio files or check excluded folders.");
@@ -819,7 +867,7 @@ public class MainActivity extends Activity {
     }
 
     private String currentPlaylist() { return pickedName(playlists.names(), playlistPicker, "Playlist: "); }
-    private String currentGenre() { return pickedName(Library.genres(this), genrePicker, "Genre: "); }
+    private String currentGenre() { return pickedName(cachedGenres, genrePicker, "Genre: "); }
     private String currentFolder() { return pickedName(Library.folders(allSongs), folderPicker, "Folder: "); }
 
     private String pickedName(List<String> names, TextView picker, String prefix) {
@@ -885,6 +933,15 @@ public class MainActivity extends Activity {
             String folder = currentFolder();
             for (Song s : Library.filter(allSongs, q))
                 if (folder == null || folder.equals(s.folder)) viewSongs.add(s);
+        } else if ("History".equals(tab)) {
+            historyEntries.clear();
+            historyByPath.clear();
+            historyEntries.addAll(history.all());
+            for (History.Entry entry : historyEntries) {
+                historyByPath.put(entry.song.path, entry);
+                viewSongs.add(entry.song);
+            }
+            historyVersion = history.version();
         } else {
             List<Song> base = Library.filter(allSongs, q);
             if ("Albums".equals(tab)) base = Library.groupByAlbum(base);
@@ -892,7 +949,7 @@ public class MainActivity extends Activity {
             viewSongs.addAll(base);
         }
 
-        if (!"Queue".equals(tab) && !"Lyrics".equals(tab)) {
+        if (!"Queue".equals(tab) && !"Lyrics".equals(tab) && !"History".equals(tab)) {
             Library.Sort sort = sortModes()[sortPosition()];
             if (sort != null) Library.sort(viewSongs, sort, true);
         }
@@ -907,6 +964,7 @@ public class MainActivity extends Activity {
         if (lyricsOn) refreshLyrics();
         refresh();
         animateItems = false;
+        saveUiState();
     }
 
     private void onItemClick(int pos) {
@@ -915,6 +973,15 @@ public class MainActivity extends Activity {
         Song picked = viewSongs.get(pos);
 
         if ("Queue".equals(tab)) { service.playSongAt(pos); return; }
+        if ("History".equals(tab)) {
+            List<Song> songs = new ArrayList<>();
+            for (History.Entry entry : historyEntries) songs.add(entry.song);
+            int at = -1;
+            for (int i = 0; i < songs.size(); i++)
+                if (songs.get(i).path != null && songs.get(i).path.equals(picked.path)) { at = i; break; }
+            service.playQueue(songs, Math.max(0, at));
+            return;
+        }
         if ("Playlists".equals(tab)) {
             String name = currentPlaylist();
             if (name == null) return;
@@ -997,6 +1064,14 @@ public class MainActivity extends Activity {
             if (tracks == null) tracks = Library.artistTracks(allSongs, s);
             return count(albums, "album") + "  ·  " + count(tracks, "track");
         }
+        if ("History".equals(tab)) {
+            History.Entry entry = historyByPath.get(s.path);
+            int plays = entry == null ? 1 : entry.count;
+            long last = entry == null ? 0 : entry.lastPlayedMs;
+            String when = last == 0 ? ""
+                    : DateUtils.getRelativeTimeSpanString(last).toString();
+            return count(plays, "play") + (when.isEmpty() ? "" : "  ·  " + when);
+        }
         return artist + "  ·  " + Library.duration(s.durationMs);
     }
 
@@ -1071,7 +1146,7 @@ public class MainActivity extends Activity {
             }
             if (h.rule != null)
                 h.rule.setVisibility(Theme.mode() == Theme.PORCELAIN ? View.VISIBLE : View.GONE);
-            h.art.setImageDrawable(drawableFor(s));
+            setArtwork(h.art, s, dp(12));
             h.title.setText(rowTitle(s));
             h.title.setTextColor(active ? Theme.activeText() : Theme.textPrimary());
             h.chevron.setTextColor(active ? Theme.activeText() : Theme.muted());
@@ -1121,30 +1196,69 @@ public class MainActivity extends Activity {
                 h.accent = currentAccent;
                 v.setBackground(active ? Glass.activeCard(currentAccent, 20) : Glass.card(20));
             }
-            h.art.setImageDrawable(drawableFor(s));
+            setArtwork(h.art, s, dp(12));
             h.title.setText(rowTitle(s));
             h.title.setTextColor(active ? Theme.activeText() : Theme.textPrimary());
             return v;
         }
     }
 
-    private Drawable drawableFor(Song s) {
-        Bitmap b = Art.get(this, s);
-        if (b == null) {
-            if (placeholderArt == null || placeholderTheme != Theme.mode()) {
-                placeholderArt = Glass.card(dp(12));
-                placeholderTheme = Theme.mode();
-            }
-            return placeholderArt;
+    private Drawable placeholderCard(int radius) {
+        if (placeholderArt == null || placeholderTheme != Theme.mode()) {
+            placeholderArt = Glass.card(radius);
+            placeholderTheme = Theme.mode();
         }
-        return Art.roundedCached(b, dp(12), s == null || s.path == null ? "" : s.path);
+        return placeholderArt;
+    }
+
+    /** Binds artwork without doing MediaMetadataRetriever work on the main thread. */
+    private void setArtwork(ImageView view, Song song, float radius) {
+        final String key = song == null || song.path == null ? "" : song.path;
+        view.setTag(key);
+        Drawable cached = Art.peekRounded(key, radius);
+        if (cached != null) {
+            view.setImageDrawable(cached);
+            return;
+        }
+        view.setImageDrawable(placeholderCard(dp(12)));
+        if (key.isEmpty()) return;
+
+        List<ImageView> waiting = pendingArtViews.get(key);
+        if (waiting != null) {
+            waiting.add(view);
+            return;
+        }
+        waiting = new ArrayList<>();
+        waiting.add(view);
+        pendingArtViews.put(key, waiting);
+        artLoader.execute(() -> {
+            Bitmap bitmap = null;
+            try { bitmap = Art.get(MainActivity.this, song); } catch (Exception ignored) {}
+            final Drawable result = bitmap == null ? null : Art.roundedCached(bitmap, radius, key);
+            runOnUiThread(() -> {
+                List<ImageView> views = pendingArtViews.remove(key);
+                if (views == null) return;
+                for (ImageView iv : views) {
+                    if (key.equals(iv.getTag()))
+                        iv.setImageDrawable(result == null ? placeholderCard(dp(12)) : result);
+                }
+            });
+        });
+    }
+
+    /** History rows may not exist in the current library; prefer the library Song for IDs. */
+    private Song resolveSong(Song song) {
+        if (song == null) return null;
+        for (Song candidate : allSongs)
+            if (candidate.path != null && candidate.path.equals(song.path)) return candidate;
+        return song;
     }
 
     // ---------------------------------------------------------- Menus
 
     private void showItemMenu(View anchor, int pos) {
         if (pos < 0 || pos >= viewSongs.size()) return;
-        final Song song = viewSongs.get(pos);
+        final Song song = resolveSong(viewSongs.get(pos));
         PopupMenu menu = new PopupMenu(this, anchor);
         Menu m = menu.getMenu();
         m.add("Play now");
@@ -1173,6 +1287,12 @@ public class MainActivity extends Activity {
                 List<Long> ids = playlists.ids(name);
                 ids.remove(song.id);
                 playlists.save(name, ids);
+                rebuild();
+                return true;
+            });
+        if ("History".equals(tab))
+            m.add("Remove from history").setOnMenuItemClickListener(item -> {
+                history.remove(song.path);
                 rebuild();
                 return true;
             });
@@ -1219,6 +1339,7 @@ public class MainActivity extends Activity {
         m.add("Backup to file");
         m.add("Restore from file");
         m.add("Rescan library");
+        m.add("Clear history");
         m.add("About");
         menu.setOnMenuItemClickListener(item -> {
             String t = item.getTitle().toString();
@@ -1243,6 +1364,12 @@ public class MainActivity extends Activity {
                 case "Backup to file": backupToFile(); break;
                 case "Restore from file": restoreFromFile(); break;
                 case "Rescan library": loadLibrary(); break;
+                case "Clear history":
+                    history.clear();
+                    historyVersion = history.version();
+                    rebuild();
+                    toast("Play history cleared");
+                    break;
                 case "About": about(); break;
             }
             return true;
@@ -1528,11 +1655,16 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onStop() {
+        saveUiState();
+        if (service != null) service.saveStateNow();
         unregisterReceiver(updateReceiver);
         super.onStop();
     }
 
     @Override protected void onDestroy() {
+        saveUiState();
+        if (service != null) service.saveStateNow();
+        artLoader.shutdownNow();
         try { unbindService(connection); } catch (Exception ignored) {}
         super.onDestroy();
     }
@@ -1588,6 +1720,10 @@ public class MainActivity extends Activity {
 
     private void refresh() {
         if (service == null) return;
+        if ("History".equals(tab) && history.version() != historyVersion) {
+            historyVersion = history.version();
+            rebuild();
+        }
         Song s = service.current();
         boolean playing = service.isPlaying();
 
