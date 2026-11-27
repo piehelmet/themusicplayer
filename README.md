@@ -17,7 +17,8 @@ Package: `com.themusicplayer.app` · minSdk 21 · targetSdk 34
 
 Tagged builds with attached APKs are on the [GitHub Releases page](../../releases):
 
-- **v5.5** (latest) — new iOS-inspired **Glass** theme, top-lit frosted panels and a redesigned Sound panel with preset chips and accent-tinted sliders
+- **v5.6** (latest) — Sound panel readability and 3D sliders; presets now refresh band levels and dB labels live, and manual band edits clear the preset highlight
+- **v5.5** — new iOS-inspired **Glass** theme, top-lit frosted panels and a redesigned Sound panel with preset chips and accent-tinted sliders
 - **v5.4** — peak-aware ReplayGain boost, equal-power crossfade, bass and loudness controls
 - **v5.3** — play history with play counts, portable build script and one-click ADB installer
 - **v5.2** — faster search and scrolling, plus the Porcelain light theme

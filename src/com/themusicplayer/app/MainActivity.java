@@ -24,6 +24,7 @@ import android.graphics.Shader;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.LayerDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -1534,11 +1535,17 @@ public class MainActivity extends Activity {
         SeekBar sb = new SeekBar(this);
         sb.setMax(max);
         sb.setProgress(progress);
-        ColorStateList accent = ColorStateList.valueOf(currentAccent);
-        sb.setProgressTintList(accent);
-        sb.setThumbTintList(accent);
-        sb.setProgressBackgroundTintList(
-                ColorStateList.valueOf(Theme.chipStroke(false, currentAccent)));
+        int radius = dp(5);
+        LayerDrawable layers = new LayerDrawable(new Drawable[]{
+                Glass.sliderTrack(currentAccent, radius),
+                Glass.sliderProgress(currentAccent, radius),
+                new ColorDrawable(Color.TRANSPARENT)});
+        layers.setId(0, android.R.id.background);
+        layers.setId(1, android.R.id.progress);
+        layers.setId(2, android.R.id.secondaryProgress);
+        layers.setLayerInset(1, 0, dp(4), 0, dp(4));
+        sb.setProgressDrawable(layers);
+        sb.setThumb(Glass.sliderThumb(currentAccent, dp(26)));
         return sb;
     }
 
@@ -1556,12 +1563,17 @@ public class MainActivity extends Activity {
         dialog.setCanceledOnTouchOutside(true);
 
         LinearLayout outer = row(LinearLayout.VERTICAL);
-        outer.setBackground(Glass.card(26));
+        outer.setBackground(Glass.panel(26));
         outer.setPadding(dp(20), dp(18), dp(20), dp(18));
         LinearLayout box = row(LinearLayout.VERTICAL);
         box.addView(section("SOUND"));
 
         if (eq != null) {
+            final short bands = eq.getNumberOfBands();
+            final short min = eq.getBandLevelRange()[0], max = eq.getBandLevelRange()[1];
+            final List<SeekBar> bandBars = new ArrayList<>();
+            final List<TextView> bandValues = new ArrayList<>();
+
             LinearLayout enableRow = row(LinearLayout.HORIZONTAL);
             enableRow.setGravity(Gravity.CENTER_VERTICAL);
             TextView enableLabel = label("Enable equalizer", 14, Theme.textPrimary());
@@ -1586,6 +1598,12 @@ public class MainActivity extends Activity {
                 TextView c = chip(eq.getPresetName(i), i == activePreset, v -> {
                     service.setPreset(preset);
                     for (TextView other : presetChips) setChipSelected(other, other == v);
+                    for (int b = 0; b < bandBars.size(); b++) {
+                        short level = eq.getBandLevel((short) b);
+                        bandBars.get(b).setProgress(level - min);
+                        bandValues.get(b).setText(String.format(java.util.Locale.US,
+                                "%.1f dB", level / 100f));
+                    }
                 });
                 presetChips.add(c);
                 presets.addView(c);
@@ -1594,8 +1612,6 @@ public class MainActivity extends Activity {
             box.addView(presetsScroll);
 
             box.addView(soundSection("BANDS"));
-            short bands = eq.getNumberOfBands();
-            final short min = eq.getBandLevelRange()[0], max = eq.getBandLevelRange()[1];
             for (short i = 0; i < bands; i++) {
                 final short band = i;
                 LinearLayout meta = row(LinearLayout.HORIZONTAL);
@@ -1613,12 +1629,15 @@ public class MainActivity extends Activity {
                     public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
                         if (!fromUser) return;
                         service.setBand(band, (short) (p + min));
+                        for (TextView preset : presetChips) setChipSelected(preset, false);
                         value.setText(String.format(java.util.Locale.US, "%.1f dB", (p + min) / 100f));
                     }
                     public void onStartTrackingTouch(SeekBar s) {}
                     public void onStopTrackingTouch(SeekBar s) {}
                 });
                 box.addView(sb);
+                bandBars.add(sb);
+                bandValues.add(value);
             }
         }
 
@@ -1671,7 +1690,7 @@ public class MainActivity extends Activity {
 
         TextView note = label("ReplayGain boost is applied automatically when a positive, "
                 + "peak-safe tag is present.", 11, Theme.sub());
-        note.setBackground(Glass.card(14));
+        note.setBackground(Glass.panel(14));
         note.setPadding(dp(12), dp(10), dp(12), dp(10));
         LinearLayout.LayoutParams noteParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1692,7 +1711,7 @@ public class MainActivity extends Activity {
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            dialog.getWindow().setDimAmount(0.55f);
+            dialog.getWindow().setDimAmount(0.66f);
         }
     }
 
