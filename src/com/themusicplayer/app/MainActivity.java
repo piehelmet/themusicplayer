@@ -711,7 +711,7 @@ public class MainActivity extends Activity {
         LinearLayout tools = row(LinearLayout.HORIZONTAL);
         tools.setGravity(Gravity.CENTER_HORIZONTAL);
         tools.setPadding(dp(14), dp(2), dp(14), dp(4));
-        tools.addView(chip("EQ", false, v -> showEqualizer()));
+        tools.addView(chip("Sound", false, v -> showSound()));
         tools.addView(chip("Speed", false, v -> askSpeed()));
         tools.addView(chip("Sleep", false, v -> askSleepTimer()));
         sheet.addView(tools);
@@ -1328,13 +1328,15 @@ public class MainActivity extends Activity {
         m.add("Manage playlists");
         m.add("Sleep timer");
         m.add("Playback speed");
-        m.add("Equalizer");
+        m.add("Sound");
         m.add("Volume");
         m.add("Crossfade: " + (service != null && service.crossfade() ? "on" : "off"));
         m.add("Visualizer: " + (visualizerOn ? "on" : "off"));
         m.add("Theme: " + Theme.name());
         m.add("Fade length");
         m.add("ReplayGain: " + (service != null && service.replayGain() ? "on" : "off"));
+        m.add("ReplayGain mode: "
+                + (service != null && service.replayGainAlbumMode() ? "album" : "track"));
         m.add("Excluded folders");
         m.add("Backup to file");
         m.add("Restore from file");
@@ -1349,6 +1351,12 @@ public class MainActivity extends Activity {
                 toggleVisualizer();
             } else if (t.startsWith("Theme")) {
                 switchTheme();
+            } else if (t.startsWith("ReplayGain mode")) {
+                if (service != null) {
+                    boolean album = !service.replayGainAlbumMode();
+                    service.setReplayGainAlbumMode(album);
+                    toast(album ? "ReplayGain: album mode" : "ReplayGain: track mode");
+                }
             } else if (t.startsWith("ReplayGain")) {
                 if (service != null) { service.setReplayGain(!service.replayGain()); toast(t); }
             } else switch (t) {
@@ -1357,7 +1365,7 @@ public class MainActivity extends Activity {
                 case "Manage playlists": managePlaylists(); break;
                 case "Sleep timer": askSleepTimer(); break;
                 case "Playback speed": askSpeed(); break;
-                case "Equalizer": showEqualizer(); break;
+                case "Sound": showSound(); break;
                 case "Volume": askVolume(); break;
                 case "Fade length": askFade(); break;
                 case "Excluded folders": chooseExcluded(); break;
@@ -1514,54 +1522,102 @@ public class MainActivity extends Activity {
                 .setNegativeButton("Cancel", null).show();
     }
 
-    private void showEqualizer() {
-        if (service == null || service.equalizer() == null) { toast("Equalizer unavailable"); return; }
+    private void showSound() {
+        if (service == null) { toast("Sound settings unavailable"); return; }
         final android.media.audiofx.Equalizer eq = service.equalizer();
+        boolean bassOk = service.bassBoostAvailable();
+        boolean loudOk = service.loudnessAvailable();
+        if (eq == null && !bassOk && !loudOk) { toast("Audio effects unavailable on this device"); return; }
+
         ScrollView scroll = new ScrollView(this);
         LinearLayout box = row(LinearLayout.VERTICAL);
-        CheckBox enable = new CheckBox(this);
-        enable.setText("Enable equalizer");
-        enable.setTextColor(Theme.textPrimary());
-        enable.setChecked(eq.getEnabled());
-        enable.setOnCheckedChangeListener((b, on) -> service.setEqualizerEnabled(on));
-        box.addView(enable);
 
-        List<String> names = new ArrayList<>();
-        for (short i = 0; i < eq.getNumberOfPresets(); i++) names.add(eq.getPresetName(i));
-        Spinner presets = new Spinner(this);
-        ArrayAdapter<String> pa = new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_item, names);
-        pa.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        presets.setAdapter(pa);
-        presets.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                service.setPreset((short) pos);
+        if (eq != null) {
+            CheckBox enable = new CheckBox(this);
+            enable.setText("Enable equalizer");
+            enable.setTextColor(Theme.textPrimary());
+            enable.setChecked(eq.getEnabled());
+            enable.setOnCheckedChangeListener((b, on) -> service.setEqualizerEnabled(on));
+            box.addView(enable);
+
+            List<String> names = new ArrayList<>();
+            for (short i = 0; i < eq.getNumberOfPresets(); i++) names.add(eq.getPresetName(i));
+            Spinner presets = new Spinner(this);
+            ArrayAdapter<String> pa = new ArrayAdapter<>(this,
+                    android.R.layout.simple_spinner_item, names);
+            pa.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            presets.setAdapter(pa);
+            presets.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                    service.setPreset((short) pos);
+                }
+                public void onNothingSelected(AdapterView<?> p) {}
+            });
+            box.addView(presets);
+
+            short bands = eq.getNumberOfBands();
+            final short min = eq.getBandLevelRange()[0], max = eq.getBandLevelRange()[1];
+            for (short i = 0; i < bands; i++) {
+                TextView t = label(eq.getBandFreqRange(i)[0] / 1000 + "–"
+                        + eq.getBandFreqRange(i)[1] / 1000 + " Hz", 12, Theme.sub());
+                box.addView(t);
+                SeekBar sb = new SeekBar(this);
+                sb.setMax(max - min);
+                sb.setProgress(eq.getBandLevel(i) - min);
+                final short band = i;
+                sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                    public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                        if (fromUser) service.setBand(band, (short) (p + min));
+                    }
+                    public void onStartTrackingTouch(SeekBar s) {}
+                    public void onStopTrackingTouch(SeekBar s) {}
+                });
+                box.addView(sb);
             }
-            public void onNothingSelected(AdapterView<?> p) {}
-        });
-        box.addView(presets);
+        }
 
-        short bands = eq.getNumberOfBands();
-        final short min = eq.getBandLevelRange()[0], max = eq.getBandLevelRange()[1];
-        for (short i = 0; i < bands; i++) {
-            TextView t = label(eq.getBandFreqRange(i)[0] / 1000 + "–"
-                    + eq.getBandFreqRange(i)[1] / 1000 + " Hz", 12, Theme.sub());
-            box.addView(t);
+        if (bassOk) {
+            TextView value = label("Bass boost: " + service.bassStrength(), 12, Theme.sub());
+            box.addView(label("Bass boost", 12, Theme.textPrimary()));
+            box.addView(value);
             SeekBar sb = new SeekBar(this);
-            sb.setMax(max - min);
-            sb.setProgress(eq.getBandLevel(i) - min);
-            final short band = i;
+            sb.setMax(1000);
+            sb.setProgress(service.bassStrength());
             sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
-                    if (fromUser) service.setBand(band, (short) (p + min));
+                    if (!fromUser) return;
+                    service.setBassStrength(p);
+                    value.setText("Bass boost: " + p);
                 }
                 public void onStartTrackingTouch(SeekBar s) {}
                 public void onStopTrackingTouch(SeekBar s) {}
             });
             box.addView(sb);
         }
+
+        if (loudOk) {
+            TextView value = label("Loudness: " + service.loudnessBoost() / 100f + " dB", 12, Theme.sub());
+            box.addView(label("Loudness", 12, Theme.textPrimary()));
+            box.addView(value);
+            SeekBar sb = new SeekBar(this);
+            sb.setMax(1200);
+            sb.setProgress(service.loudnessBoost());
+            sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                    if (!fromUser) return;
+                    service.setLoudnessBoost(p);
+                    value.setText("Loudness: " + (p / 100f) + " dB");
+                }
+                public void onStartTrackingTouch(SeekBar s) {}
+                public void onStopTrackingTouch(SeekBar s) {}
+            });
+            box.addView(sb);
+        }
+
+        box.addView(label("ReplayGain boost is applied automatically when a positive, "
+                + "peak-safe tag is present.", 11, Theme.sub()));
         scroll.addView(box);
-        new AlertDialog.Builder(this).setTitle("Equalizer").setView(scroll)
+        new AlertDialog.Builder(this).setTitle("Sound").setView(scroll)
                 .setPositiveButton("Done", null).show();
     }
 
@@ -1635,7 +1691,7 @@ public class MainActivity extends Activity {
                 .setMessage("An original, offline music player.\n\n"
                         + "High-end translucent UI with Obsidian, Ivory, Aurora and Porcelain themes, "
                         + "optional spectrum visualizer, animated ambient backgrounds, "
-                        + "album art, crossfade, ReplayGain, equalizer, playlists, "
+                        + "album art, crossfade, ReplayGain, EQ, bass, loudness, playlists, "
                         + "queue, lyrics, sleep timer, widgets and media controls.\n\n"
                         + "No internet permission. No ads. No tracking.")
                 .setPositiveButton("OK", null).show();

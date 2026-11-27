@@ -17,7 +17,8 @@ Package: `com.themusicplayer.app` · minSdk 21 · targetSdk 34
 
 Tagged builds with attached APKs are on the [GitHub Releases page](../../releases):
 
-- **v5.3** (latest) — play history with play counts, portable build script and one-click ADB installer
+- **v5.4** (latest) — peak-aware ReplayGain boost, equal-power crossfade, bass and loudness controls
+- **v5.3** — play history with play counts, portable build script and one-click ADB installer
 - **v5.2** — faster search and scrolling, plus the Porcelain light theme
 - **v5.1** — corrected grouped sorting/filtering across Albums, Artists, Genres and Folders
 - **v5.0** — Aurora theme, persistent rotation, reliable active-row highlight
@@ -50,8 +51,11 @@ were rebuilt from their tagged commits and are debug-signed with the same key. T
 ### Playback engine
 - Queue with shuffle, repeat off/all/one, play-next, add-to-queue, remove and reorder (drag or menu)
 - **Crossfade** between tracks with adjustable 2–15 s fade length
-- **ReplayGain** volume normalization (track/album tags, with fallback)
-- Per-song playback speed 0.5x–2x, device equalizer with presets and manual bands
+- **ReplayGain** volume normalization (track/album tags, with fallback), now peak-aware:
+  positive gain is applied as a safe boost without clipping, with a track/album mode toggle
+- Equal-power crossfade (no mid-fade loudness dip), effects applied to both players during fades
+- Per-song playback speed 0.5x–2x, device equalizer with presets and manual bands,
+  plus optional bass boost and loudness sliders in the new **Sound** dialog
 - Sleep timer, app volume with ReplayGain-aware scaling
 - Background foreground-service playback, notification controls, MediaSession + hardware keys
 

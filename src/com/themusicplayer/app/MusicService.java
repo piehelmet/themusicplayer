@@ -12,7 +12,9 @@ import android.content.SharedPreferences;
 import android.media.AudioAttributes;
 import android.media.MediaMetadata;
 import android.media.MediaPlayer;
+import android.media.audiofx.BassBoost;
 import android.media.audiofx.Equalizer;
+import android.media.audiofx.LoudnessEnhancer;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.os.Binder;
@@ -49,7 +51,8 @@ public class MusicService extends Service {
     private MediaPlayer player;
     private MediaPlayer incoming;
     private MediaSession session;
-    private Equalizer equalizer;
+    private AudioFx fx;
+    private AudioFx incomingFx;
     private SharedPreferences prefs;
 
     private final List<Song> queue = new ArrayList<>();
@@ -73,6 +76,9 @@ public class MusicService extends Service {
     private short[] eqBands;
     private short eqPreset = -1;
     private boolean eqEnabled = false;
+    private int bassStrength = 0;      // 0..1000, 0 = off
+    private int loudnessMb = 0;        // 0..1200 millibels, 0 = off
+    private boolean replayGainAlbum = false;
 
     private PowerManager.WakeLock wakeLock;
     private final Random random = new Random();
@@ -104,6 +110,58 @@ public class MusicService extends Service {
         public MusicService getService() { return MusicService.this; }
     }
 
+    /** Effects bound to one MediaPlayer session. Crossfade keeps one set per player. */
+    private static final class AudioFx {
+        final Equalizer eq;
+        final BassBoost bass;
+        final LoudnessEnhancer loud;
+
+        AudioFx(int session) {
+            Equalizer e = null;
+            try { e = new Equalizer(0, session); } catch (Exception ignored) {}
+            eq = e;
+            BassBoost b = null;
+            try { b = new BassBoost(0, session); } catch (Exception ignored) {}
+            bass = b;
+            LoudnessEnhancer l = null;
+            try { l = new LoudnessEnhancer(session); } catch (Exception ignored) {}
+            loud = l;
+        }
+
+        void apply(short[] bands, short preset, boolean eqOn, int bassValue, int boostMb) {
+            if (eq != null) {
+                try {
+                    if (bands != null && bands.length == eq.getNumberOfBands()) {
+                        for (short i = 0; i < bands.length; i++) eq.setBandLevel(i, bands[i]);
+                    } else if (preset >= 0 && preset < eq.getNumberOfPresets()) {
+                        eq.usePreset(preset);
+                    }
+                    eq.setEnabled(eqOn);
+                } catch (Exception ignored) {}
+            }
+            if (bass != null) {
+                try {
+                    int strength = Math.max(0, Math.min(1000, bassValue));
+                    bass.setStrength((short) strength);
+                    bass.setEnabled(strength > 0);
+                } catch (Exception ignored) {}
+            }
+            if (loud != null) {
+                try {
+                    int gain = Math.max(0, Math.min(2000, boostMb));
+                    loud.setTargetGain(gain);
+                    loud.setEnabled(gain > 0);
+                } catch (Exception ignored) {}
+            }
+        }
+
+        void release() {
+            if (eq != null) { try { eq.release(); } catch (Exception ignored) {} }
+            if (bass != null) { try { bass.release(); } catch (Exception ignored) {} }
+            if (loud != null) { try { loud.release(); } catch (Exception ignored) {} }
+        }
+    }
+
     @Override public void onCreate() {
         super.onCreate();
         prefs = getSharedPreferences("tmp_settings", MODE_PRIVATE);
@@ -112,6 +170,20 @@ public class MusicService extends Service {
         replayGainOn = prefs.getBoolean("replaygain", true);
         volume = prefs.getFloat("volume", 1f);
         fadeMs = prefs.getInt("fade_ms", 5000);
+        bassStrength = prefs.getInt("bass_strength", 0);
+        loudnessMb = prefs.getInt("loudness_mb", 0);
+        replayGainAlbum = prefs.getBoolean("rg_album", false);
+        eqEnabled = prefs.getBoolean("eq_enabled", false);
+        eqPreset = (short) prefs.getInt("eq_preset", -1);
+        String rawBands = prefs.getString("eq_bands", "");
+        if (rawBands != null && !rawBands.isEmpty()) {
+            try {
+                String[] parts = rawBands.split(",");
+                short[] values = new short[parts.length];
+                for (int i = 0; i < parts.length; i++) values[i] = Short.parseShort(parts[i].trim());
+                eqBands = values;
+            } catch (Exception ignored) {}
+        }
 
         player = newPlayer();
         session = new MediaSession(this, "TheMusicPlayer");
@@ -233,6 +305,7 @@ public class MusicService extends Service {
         if (index < 0 || index >= queue.size()) return;
         Song song = queue.get(index);
         prepared = false;
+        if (fx != null) { fx.release(); fx = null; }
         try {
             player.reset();
             player.setDataSource(song.path);
@@ -242,9 +315,9 @@ public class MusicService extends Service {
                     .build());
             player.setOnPreparedListener(mp -> {
                 prepared = true;
+                fx = createFx(mp);
+                applyFx(fx, song);
                 applySpeed(mp);
-                initEqualizer();
-                restoreEq();
                 if (pendingSeekMs > 0) {
                     try {
                         int duration = mp.getDuration();
@@ -300,10 +373,13 @@ public class MusicService extends Service {
                     .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                     .build());
+            Song incomingSong = queue.get(nextIndex);
             mp.setOnPreparedListener(p -> {
                 incomingPrepared = true;
                 crossfading = true;
                 crossStart = System.currentTimeMillis();
+                incomingFx = createFx(p);
+                applyFx(incomingFx, incomingSong);
                 applySpeed(p);
                 p.setVolume(0f, 0f);
                 p.start();
@@ -322,8 +398,10 @@ public class MusicService extends Service {
         float g1 = gain(current());
         float g2 = gain(incomingIndex >= 0 && incomingIndex < queue.size()
                 ? queue.get(incomingIndex) : null);
-        float v1 = clamp(volume * g1 * (1f - f));
-        float v2 = clamp(volume * g2 * f);
+        // Equal-power curve: avoids the ~3 dB dip of a linear amplitude crossfade.
+        double angle = f * Math.PI / 2.0;
+        float v1 = clamp((float) (volume * g1 * Math.cos(angle)));
+        float v2 = clamp((float) (volume * g2 * Math.sin(angle)));
         try { player.setVolume(v1, v1); incoming.setVolume(v2, v2); } catch (Exception ignored) {}
         if (f >= 1f) finishCrossfade();
     }
@@ -342,10 +420,10 @@ public class MusicService extends Service {
         crossfading = false;
         try { old.stop(); } catch (Exception ignored) {}
         try { old.release(); } catch (Exception ignored) {}
-        saveEq();
-        if (equalizer != null) { try { equalizer.release(); } catch (Exception ignored) {} equalizer = null; }
-        initEqualizer();
-        restoreEq();
+        if (fx != null) { fx.release(); fx = null; }
+        fx = incomingFx;
+        incomingFx = null;
+        applyFx(fx, now);
         applySpeed(player);
         applyVolume();
         accent = Art.accent(Art.get(this, current()));
@@ -361,6 +439,7 @@ public class MusicService extends Service {
             try { incoming.stop(); } catch (Exception ignored) {}
             try { incoming.release(); } catch (Exception ignored) {}
         }
+        if (incomingFx != null) { incomingFx.release(); incomingFx = null; }
         incoming = null;
         incomingPrepared = false;
         crossfading = false;
@@ -484,6 +563,13 @@ public class MusicService extends Service {
         broadcast();
     }
 
+    public void setReplayGainAlbumMode(boolean album) {
+        replayGainAlbum = album;
+        prefs.edit().putBoolean("rg_album", album).apply();
+        applyVolume();
+        broadcast();
+    }
+
     public void setFadeSeconds(int seconds) {
         fadeMs = Math.max(1, Math.min(20, seconds)) * 1000;
         prefs.edit().putInt("fade_ms", fadeMs).apply();
@@ -492,67 +578,107 @@ public class MusicService extends Service {
 
     private float gain(Song song) {
         if (song == null) return 1f;
-        return replayGainOn ? ReplayGain.volume(song.path, false) : 1f;
+        return replayGainOn ? ReplayGain.volume(song.path, replayGainAlbum) : 1f;
     }
 
     private static float clamp(float v) { return Math.max(0f, Math.min(1f, v)); }
 
     private void applyVolume() {
-        if (player == null || !prepared || crossfading) return;
+        if (player == null) return;
         float v = clamp(volume * gain(current()));
         try { player.setVolume(v, v); } catch (Exception ignored) {}
+        applyFx(fx, current());
+        applyFx(incomingFx, incomingSong());
     }
 
-    public Equalizer equalizer() { initEqualizer(); return equalizer; }
+    private Song incomingSong() {
+        return incomingIndex >= 0 && incomingIndex < queue.size() ? queue.get(incomingIndex) : null;
+    }
 
-    private void initEqualizer() {
-        if (equalizer != null || player == null) return;
+    private AudioFx createFx(MediaPlayer mp) {
         try {
-            equalizer = new Equalizer(0, player.getAudioSessionId());
-            equalizer.setEnabled(false);
-        } catch (Exception ignored) {}
+            int session = mp.getAudioSessionId();
+            if (session <= 0) return null;
+            return new AudioFx(session);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
-    private void saveEq() {
-        if (equalizer == null) return;
-        try {
-            eqEnabled = equalizer.getEnabled();
-            eqPreset = equalizer.getCurrentPreset();
-            eqBands = new short[equalizer.getNumberOfBands()];
-            for (short i = 0; i < eqBands.length; i++) eqBands[i] = equalizer.getBandLevel(i);
-        } catch (Exception ignored) {}
+    /** Applies saved EQ/effects plus the peak-safe ReplayGain boost for one track. */
+    private void applyFx(AudioFx target, Song song) {
+        if (target == null) return;
+        int boost = replayGainOn && song != null
+                ? ReplayGain.boostMilliBel(song.path, replayGainAlbum) : 0;
+        target.apply(eqBands, eqPreset, eqEnabled, bassStrength, loudnessMb + boost);
     }
 
-    private void restoreEq() {
-        if (equalizer == null) return;
-        try {
-            if (eqBands != null && eqBands.length == equalizer.getNumberOfBands())
-                for (short i = 0; i < eqBands.length; i++) equalizer.setBandLevel(i, eqBands[i]);
-            else if (eqPreset >= 0 && eqPreset < equalizer.getNumberOfPresets())
-                equalizer.usePreset(eqPreset);
-            equalizer.setEnabled(eqEnabled);
-        } catch (Exception ignored) {}
+    private void persistEq() {
+        SharedPreferences.Editor e = prefs.edit()
+                .putBoolean("eq_enabled", eqEnabled)
+                .putInt("eq_preset", eqPreset);
+        if (eqBands == null) e.remove("eq_bands");
+        else {
+            StringBuilder sb = new StringBuilder();
+            for (short value : eqBands) {
+                if (sb.length() > 0) sb.append(',');
+                sb.append(value);
+            }
+            e.putString("eq_bands", sb.toString());
+        }
+        e.apply();
     }
+
+    public Equalizer equalizer() { return fx == null ? null : fx.eq; }
+    public boolean bassBoostAvailable() { return fx != null && fx.bass != null; }
+    public boolean loudnessAvailable() { return fx != null && fx.loud != null; }
+    public int bassStrength() { return bassStrength; }
+    public int loudnessBoost() { return loudnessMb; }
 
     public void setEqualizerEnabled(boolean on) {
-        initEqualizer();
         eqEnabled = on;
-        if (equalizer != null) equalizer.setEnabled(on);
+        persistEq();
+        applyFx(fx, current());
+        applyFx(incomingFx, incomingSong());
         broadcast();
     }
 
     public void setBand(short band, short level) {
-        initEqualizer();
-        if (equalizer != null) {
-            try { equalizer.setBandLevel(band, level); saveEq(); } catch (Exception ignored) {}
+        if (eqBands == null && fx != null && fx.eq != null) {
+            try { eqBands = new short[fx.eq.getNumberOfBands()]; } catch (Exception ignored) {}
         }
+        if (eqBands == null || band < 0 || band >= eqBands.length) return;
+        eqBands[band] = level;
+        eqPreset = -1;
+        persistEq();
+        applyFx(fx, current());
+        applyFx(incomingFx, incomingSong());
+        broadcast();
     }
 
     public void setPreset(short preset) {
-        initEqualizer();
-        if (equalizer != null) {
-            try { equalizer.usePreset(preset); saveEq(); } catch (Exception ignored) {}
-        }
+        eqPreset = preset;
+        eqBands = null;
+        persistEq();
+        applyFx(fx, current());
+        applyFx(incomingFx, incomingSong());
+        broadcast();
+    }
+
+    public void setBassStrength(int strength) {
+        bassStrength = Math.max(0, Math.min(1000, strength));
+        prefs.edit().putInt("bass_strength", bassStrength).apply();
+        applyFx(fx, current());
+        applyFx(incomingFx, incomingSong());
+        broadcast();
+    }
+
+    public void setLoudnessBoost(int boostMb) {
+        loudnessMb = Math.max(0, Math.min(1200, boostMb));
+        prefs.edit().putInt("loudness_mb", loudnessMb).apply();
+        applyFx(fx, current());
+        applyFx(incomingFx, incomingSong());
+        broadcast();
     }
 
     // --------------------------------------------------------- State
@@ -569,6 +695,7 @@ public class MusicService extends Service {
     public float volume() { return volume; }
     public boolean crossfade() { return crossfadeOn; }
     public boolean replayGain() { return replayGainOn; }
+    public boolean replayGainAlbumMode() { return replayGainAlbum; }
     public int fadeSeconds() { return fadeMs / 1000; }
     public boolean crossfading() { return crossfading; }
     public int accentColor() { return accent; }
@@ -738,7 +865,8 @@ public class MusicService extends Service {
         handler.removeCallbacks(tick);
         cancelCrossfade();
         try { player.stop(); player.release(); } catch (Exception ignored) {}
-        if (equalizer != null) { try { equalizer.release(); } catch (Exception ignored) {} }
+        if (fx != null) { fx.release(); fx = null; }
+        if (incomingFx != null) { incomingFx.release(); incomingFx = null; }
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         session.setActive(false);
         session.release();
